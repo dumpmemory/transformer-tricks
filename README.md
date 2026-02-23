@@ -6,8 +6,8 @@
 </h1>
 
 A collection of tricks to simplify and speed up transformer models:
-- Slim attention: [paper](https://arxiv.org/abs/2503.05840), [video](https://youtu.be/uVtk3B6YO4Y), [podcast](https://notebooklm.google.com/notebook/ac47a53c-866b-4271-ab79-bc48d1b41722/audio), [notebook](https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/slimAttn_paper.ipynb), [code-readme](doc/slimAttn.md), :hugs: [article](https://huggingface.co/blog/Kseniase/attentions), [reddit](https://www.reddit.com/r/LocalLLaMA/comments/1j9wkc2/slim_attention_cut_your_context_memory_in_half)
-- FlashNorm: [paper](https://arxiv.org/abs/2407.09577), [video](https://youtu.be/GEuJv34_XgU), [podcast](https://notebooklm.google.com/notebook/0877599c-720c-49b5-b451-8a41af592dd1/audio), [notebook](https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm_paper.ipynb), [code-readme](doc/flashNorm.md)
+- Slim attention: [paper](https://arxiv.org/abs/2503.05840), [video](https://youtu.be/uVtk3B6YO4Y), [podcast](https://notebooklm.google.com/notebook/ac47a53c-866b-4271-ab79-bc48d1b41722/audio), [notebook](https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/slimAttn_paper.ipynb), [code-readme](https://github.com/OpenMachine-ai/transformer-tricks/blob/main/doc/slimAttn.md), :hugs: [article](https://huggingface.co/blog/Kseniase/attentions), [reddit](https://www.reddit.com/r/LocalLLaMA/comments/1j9wkc2/slim_attention_cut_your_context_memory_in_half)
+- FlashNorm: [paper](https://arxiv.org/abs/2407.09577), [video](https://youtu.be/GEuJv34_XgU), [podcast](https://notebooklm.google.com/notebook/0877599c-720c-49b5-b451-8a41af592dd1/audio), [notebook](https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm_paper.ipynb), [code-readme](https://github.com/OpenMachine-ai/transformer-tricks/blob/main/doc/flashNorm.md)
 - MatShrink \[work in progress\]: [paper](https://docs.google.com/viewer?url=https://raw.githubusercontent.com/OpenMachine-ai/transformer-tricks/refs/heads/main/doc/matShrink.pdf)
 - Precomputing the first layer: [paper](https://arxiv.org/abs/2402.13388), [video](https://youtu.be/pUeSwnCOoNI), [podcast](https://notebooklm.google.com/notebook/7794278e-de6a-40fc-ab1c-3240a40e55d5/audio)
 - KV-weights only for skipless transformers: [paper](https://arxiv.org/abs/2404.12362), [video](https://youtu.be/Tx_lMpphd2g), [podcast](https://notebooklm.google.com/notebook/0875eef7-094e-4c30-bc13-90a1a074c949/audio), [notebook](https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/removeWeights_paper.ipynb)
@@ -15,6 +15,9 @@ A collection of tricks to simplify and speed up transformer models:
 These transformer tricks extend a recent trend in neural network design toward architectural parsimony, in which unnecessary components are removed to create more efficient models. Notable examples include [RMSNorm’s](https://arxiv.org/abs/1910.07467) simplification of LayerNorm by removing mean centering, [PaLM's](https://arxiv.org/abs/2204.02311) elimination of bias parameters, and [decoder-only transformer's](https://arxiv.org/abs/1801.10198) omission of the encoder stack. This trend began with the original [transformer model's](https://arxiv.org/abs/1706.03762) removal of recurrence and convolutions.
 
 For example, our [FlashNorm](https://arxiv.org/abs/2407.09577) removes the weights from RMSNorm and merges them with the next linear layer. And [slim attention](https://arxiv.org/abs/2503.05840) removes the entire V-cache from the context memory for MHA transformers.
+
+Transformer tricks GitHub repo: [here](https://github.com/OpenMachine-ai/transformer-tricks)
+<!-- Above link is important for the PyPI package, which uses the same README. That way, folks can click from the PyPI website to this repo -->
 
 ---
 
@@ -46,8 +49,8 @@ pip3 install --quiet -r requirements.txt
 
 ## Documentation
 Follow the links below for documentation of the python code in this directory:
-- [Slim attention](doc/slimAttn.md)
-- [Flash normalization](doc/flashNorm.md)
+- [Slim attention](https://github.com/OpenMachine-ai/transformer-tricks/blob/main/doc/slimAttn.md)
+- [Flash normalization](https://github.com/OpenMachine-ai/transformer-tricks/blob/main/doc/flashNorm.md)
 
 ---
 
@@ -66,7 +69,7 @@ Please subscribe to our [newsletter](https://transformertricks.substack.com) on 
 ---
 
 ## Contributing
-We pay cash for high-impact contributions. Please check out [CONTRIBUTING](doc/CONTRIBUTING.md) for how to get involved.
+We pay cash for high-impact contributions. Please check out [CONTRIBUTING](https://github.com/OpenMachine-ai/transformer-tricks/blob/main/doc/CONTRIBUTING.md) for how to get involved.
 
 ---
 
