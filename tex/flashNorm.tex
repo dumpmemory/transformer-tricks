@@ -33,7 +33,7 @@
 %\title{Flash normalization: fast normalization for LLMs}
 %\title{Flash normalization: fast RMSNorm for LLMs}
 
-\author{Nils Graef\thanks{\texttt{info@openmachine.ai}}, \, Andrew Wasielewski, \, Matthew Clapp \\
+\author{Nils Graef\thanks{\texttt{info@openmachine.ai}}, \, Andrew Wasielewski, \, Matthew Clapp, \, Filip Makraduli \\
   \href{https://openmachine.ai}{OpenMachine}}
 
 \begin{document} \maketitle
@@ -197,9 +197,48 @@ For the example $n = 512, m = 128$ and batch 1, Fig. \ref{fig8} shows timing dia
 \label{fig8} \end{figure}
 
 \section{Experiments and conclusions}
-Refer to \citep{hfFlashNorm, tricks} for Python code that demonstrates the mathematical equivalency of the optimizations presented in this paper. The overall speedup of FlashNorm is modest: We measured a throughput of 204 tokens per second for OpenELM-270M with 4-bit weight quantization using the MLX framework on an M1 MacBook Air. This throughput increases to only 225 tokens per second when we remove RMSNorm entirely. Therefore, the maximum possible speedup of any RMSNorm optimization is $\leq$ 10\% for this model.
+Refer to \citep{hfFlashNorm, tricks} for Python code that demonstrates the mathematical equivalency of the optimizations presented in this paper. A reproducible Colab notebook for the GPU benchmarks below is available in the \verb+transformer-tricks+ repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_gpu\_benchmark.ipynb}}.
 
-For many applications, the main advantage of FlashNorm is simplification. This is similar to the simplifications we get from using RMSNorm over Layer Normalization (LayerNorm \citep{layerNorm}), and from PaLM's removal of bias-parameters from all linear layers  \citep{PaLM}.
+We verified lossless weight folding on SmolLM2-135M \citep{smollm} using \verb+flashify_repo()+ from the \verb+transformer-tricks+ package \citep{tricks}. The original and weight-folded models produce identical logits (max difference = 0.0, cosine similarity = 1.0) and identical generated text.
+
+To validate the parallel execution described in Fig.~\ref{fig8}, we benchmarked the norm-then-project operation on an NVIDIA T4 GPU (65~TFLOPS FP16, 320~GB/s). We compare sequential execution (RMSNorm $\rightarrow$ GEMM) against FlashNorm (GEMM $\|$ $1/\rms$ $\rightarrow$ scale), where the GEMM runs on tensor cores and $1/\rms$ runs on vector cores via a Triton kernel on separate CUDA streams. Table~\ref{tab:overlap} shows the results at SmolLM2-135M scale, and Table~\ref{tab:overlap7b} at Llama-7B scale.
+
+\begin{table}[h!] \centering
+\caption{Norm+project latency on T4 GPU at SmolLM2-135M scale ($n{=}576, k{=}960$).}
+\label{tab:overlap}
+\begin{tabular}{r r r r l}
+\hline
+Tokens & Sequential & FlashNorm & Speedup & Regime \\
+\hline
+1      & 0.374\,ms & 0.616\,ms & $-$64.8\% & decode (mem-bound) \\
+64     & 0.506\,ms & 0.737\,ms & $-$45.8\% & decode (mem-bound) \\
+4096   & 0.704\,ms & 0.468\,ms & $+$33.6\% & prefill (compute-bound) \\
+8192   & 0.929\,ms & 0.599\,ms & $+$35.5\% & prefill (compute-bound) \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[h!] \centering
+\caption{Norm+project latency on T4 GPU at Llama-7B scale ($n{=}4096, k{=}4096$).}
+\label{tab:overlap7b}
+\begin{tabular}{r r r r}
+\hline
+Tokens & Sequential & FlashNorm & Speedup \\
+\hline
+1      & 0.641\,ms & 0.927\,ms & $-$44.6\% \\
+64     & 0.307\,ms & 0.644\,ms & $-$109.8\% \\
+256    & 0.577\,ms & 0.546\,ms & $+$5.5\% \\
+1024   & 1.882\,ms & 1.654\,ms & $+$12.1\% \\
+4096   & 7.628\,ms & 6.570\,ms & $+$13.9\% \\
+\hline
+\end{tabular}
+\end{table}
+
+The speedup appears only when the GEMM is compute-bound (many tokens, i.e.\ prefill). For memory-bound GEMMs (few tokens, i.e.\ decode), stream management overhead dominates. Profiling individual operations within a SmolLM2-135M decoder layer at 4096 tokens confirms that the $1/\rms$ calculation takes ${\sim}0.08$\,ms per layer. Across 30 layers, the theoretical maximum savings from perfect overlap is ${\sim}5$\,ms out of ${\sim}60$\,ms total (${\sim}8\%$).
+
+While the speedup on the norm+project operation itself is significant (33--35\%), the end-to-end model speedup is modest because this operation is a fraction of total layer time. For comparison, we measured a throughput of 204 tokens per second for OpenELM-270M with 4-bit weight quantization using the MLX framework on an M1 MacBook Air. This throughput increases to only 225 tokens per second when we remove RMSNorm entirely, giving an upper bound of $\leq$ 10\% for this model. Native integration into inference frameworks at the kernel level---where stream management overhead is negligible---would allow the 33--35\% operation-level improvement to translate more directly into end-to-end gains, particularly for larger models with bigger GEMMs.
+
+For many applications, the main advantage of FlashNorm is simplification. This is similar to the simplifications we get from using RMSNorm over Layer Normalization (LayerNorm \citep{layerNorm}), and from PaLM's removal of bias-parameters from all linear layers \citep{PaLM}.
 
 Future work includes integrating FlashNorm into popular frameworks such as HuggingFace Transformers \citep{HFtransformers}, whisper.cpp \citep{whisper-cpp}, llama.cpp \citep{llama-cpp}, vLLM \citep{vLLM}, llamafile \citep{llamafile}, LM Studio \citep{lmstudio}, Ollama \citep{ollama}, SGLang \citep{sglang}, and combining it with parameter quantization.
 
