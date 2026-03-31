@@ -1,4 +1,4 @@
-personal_ws-1.1 en 329 
+personal_ws-1.1 en 347 
 ADDs
 AMS
 AMSTeX
@@ -11,12 +11,14 @@ BigScience
 Bilinear
 BioMedLM
 BitNet
+CUDA
 CURLoRA
 Chebyshev
 Chronos
 Clapp
 CodeGemma
 CodeLlama
+Colab
 CrisperWhisper
 Crowdsourcing
 DCLM
@@ -34,8 +36,12 @@ Evo
 Explainer
 FFN
 FFNs
+Filip
+FlashAttention
 FlashNorm
 FlashNorm's
+GEMM
+GEMMs
 GLU
 GPT
 GPT's
@@ -73,6 +79,7 @@ MPT
 MQA
 MULs
 MacBook
+Makraduli
 MatMul
 MatMuls
 Metagene
@@ -144,6 +151,7 @@ SoCs
 Soma
 SwiGLU
 TBD
+TFLOPS
 TODO
 TPU
 TPUs
@@ -179,6 +187,7 @@ aspirational
 autoregressive
 autoregressively
 aya
+benchmarked
 bilinear
 biomedLM
 bitnet
@@ -190,6 +199,7 @@ codeGemma
 compressibility
 concat
 config
+convBN
 convolutional
 cpp
 crowdsourcing
@@ -199,6 +209,7 @@ dclm
 dec
 decompositions
 deepseek
+diag
 embeddings
 eps
 et
@@ -208,9 +219,11 @@ feedforward
 ffn
 finetuning
 flashNorm
+flashify
 fp
 gemma
 gpt
+gpu
 graphicx
 hH
 hasselmo
@@ -242,6 +255,8 @@ lllccccccc
 llm
 llmCompiler
 lmstudio
+logit
+logits
 longformer
 losslessly
 maira
@@ -258,6 +273,7 @@ nd
 neurips
 nonanonymized
 nonatbib
+nonlinearity
 nonsingular
 np
 num
@@ -289,6 +305,7 @@ preprint
 preprocessed
 pretrained
 pypi
+quantJacob
 quantizable
 qwen
 readme
@@ -300,6 +317,7 @@ rll
 rms
 scalable
 scaler
+scalers
 sglang
 skipless
 slimAttn
