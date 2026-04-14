@@ -29,3 +29,4 @@ This folder contains the latex files for the Transformer Tricks papers. The flow
 # Submit to conference
 - We don't have any experience with this
 - It requires adding an introduction section and an extensive experiment section
+- List of ML and AI conferences [here](https://github.com/khairulislam/ML-conferences)
