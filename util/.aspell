@@ -1,4 +1,4 @@
-personal_ws-1.1 en 348 
+personal_ws-1.1 en 354 
 ADDs
 AMS
 AMSTeX
@@ -38,6 +38,7 @@ FFN
 FFNs
 Filip
 FlashAttention
+FlashInfer
 FlashNorm
 FlashNorm's
 GEMM
@@ -78,6 +79,7 @@ MLX
 MPT
 MQA
 MULs
+MXNorm
 MacBook
 Makraduli
 MatMul
@@ -219,6 +221,7 @@ explainer
 feedforward
 ffn
 finetuning
+flashInfer
 flashNorm
 flashify
 fp
@@ -267,6 +270,7 @@ metricX
 miniCPMv
 minimax
 mla
+mlx
 mnp
 multinomial
 natbib
@@ -324,6 +328,7 @@ skipless
 slimAttn
 smollm
 smolvlm
+smoothQuant
 softmax
 sparsities
 stLayer
@@ -338,6 +343,7 @@ tera
 tex
 th
 timesFM
+torchCompileFuse
 tt
 un
 unoptimized
