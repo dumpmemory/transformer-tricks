@@ -47,6 +47,35 @@ pip3 install --quiet -r requirements.txt
 
 ---
 
+## Flashify your own model
+
+Convert any RMSNorm-based HuggingFace checkpoint to a `-FlashNorm` variant and publish it under your own account. The recipe below does the full round-trip in a dozen lines; it works for Llama, Mistral, Gemma, Qwen, SmolLM, and any other transformer that uses RMSNorm followed by a linear layer.
+
+```python
+# pip install transformer-tricks huggingface-hub
+import transformer_tricks as tt
+from huggingface_hub import HfApi, login
+
+login()                                            # paste your HF write token when prompted
+
+SRC = 'meta-llama/Llama-3.2-1B'                    # source model on HF
+OUT = 'YOUR_USERNAME/Llama-3.2-1B-FlashNorm'       # destination (under your account)
+LOCAL = './Llama-3.2-1B_flashNorm'                 # local workdir
+
+tt.flashify_repo(SRC, dir=LOCAL, strict=True)      # fold g into W*, remove norm tensors
+
+api = HfApi()
+api.create_repo(OUT, exist_ok=True)
+api.upload_folder(repo_id=OUT, folder_path=LOCAL)
+print(f'Published https://huggingface.co/{OUT}')
+```
+
+The `strict=True` flag folds the per-channel norm weights `g` into the following linear layer and removes the now-redundant norm tensors from the state dict entirely. The resulting checkpoint is mathematically equivalent to the source (Proposition 1 of the [FlashNorm paper](https://arxiv.org/abs/2407.09577)). Framework support status (HuggingFace Transformers, vLLM, llama.cpp) is tracked on the canonical FlashNorm checkpoint: [open-machine/SmolLM2-135M-FlashNorm](https://huggingface.co/open-machine/SmolLM2-135M-FlashNorm).
+
+A runnable notebook version of this recipe is at [`notebooks/flashify_and_publish.ipynb`](https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashify_and_publish.ipynb).
+
+---
+
 ## Documentation
 Follow the links below for documentation of the python code in this directory:
 - [Slim attention](https://github.com/OpenMachine-ai/transformer-tricks/blob/main/doc/slimAttn.md)
@@ -58,6 +87,7 @@ Follow the links below for documentation of the python code in this directory:
 The papers are accompanied by the following Jupyter notebooks:
 - Slim attention: <a href="https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/slimAttn_paper.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Colab" height="20"></a>
 - Flash normalization: <a href="https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm_example.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Colab" height="20"></a> <a href="https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm_paper.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Colab" height="20"></a> <a href="https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm_gpu_benchmark.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Colab" height="20"></a>
+- Flashify your own model and publish to HuggingFace: <a href="https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashify_and_publish.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Colab" height="20"></a>
 - Removing weights from skipless transformers: <a href="https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/removeWeights_paper.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Colab" height="20"></a>
 
 ---
