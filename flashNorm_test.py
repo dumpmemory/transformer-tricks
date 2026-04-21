@@ -6,31 +6,36 @@ import transformer_tricks as tt
 
 tt.quiet_hf()  # calm down HuggingFace
 
-# convert models to flashNorm
+# convert models to flashNorm -- compat mode (default) first, then strict mode
+
+# -- compat mode: checkpoint loads with stock AutoModelForCausalLM --
 tt.flashify_repo('HuggingFaceTB/SmolLM-135M')
 tt.flashify_repo('HuggingFaceTB/SmolLM-360M')
 #tt.flashify_repo('HuggingFaceTB/SmolLM-1.7B', bars=True)
 #tt.flashify_repo('microsoft/Phi-3-mini-4k-instruct', bars=True)
 
-# run models
 tt.hello_world('HuggingFaceTB/SmolLM-135M')
-tt.hello_world(              'SmolLM-135M_flashNorm_test')
-tt.hello_world(              'SmolLM-135M_flashNorm', arch='LlamaFlashNorm')
+tt.hello_world(              'SmolLM-135M_flashNorm')
 tt.hello_world('HuggingFaceTB/SmolLM-360M')
-tt.hello_world(              'SmolLM-360M_flashNorm_test')
-tt.hello_world(              'SmolLM-360M_flashNorm', arch='LlamaFlashNorm')
+tt.hello_world(              'SmolLM-360M_flashNorm')
 #tt.hello_world('HuggingFaceTB/SmolLM-1.7B')
 #tt.hello_world(              'SmolLM-1.7B_flashNorm')
 #tt.hello_world('microsoft/Phi-3-mini-4k-instruct')
 #tt.hello_world(          'Phi-3-mini-4k-instruct_flashNorm')
 
-# measure perplexity
-tt.perplexity('HuggingFaceTB/SmolLM-135M',                                  speedup=16)
-tt.perplexity(              'SmolLM-135M_flashNorm_test',                   speedup=16)
-tt.perplexity(              'SmolLM-135M_flashNorm', arch='LlamaFlashNorm', speedup=16)
-tt.perplexity('HuggingFaceTB/SmolLM-360M',                                  speedup=16)
-tt.perplexity(              'SmolLM-360M_flashNorm_test',                   speedup=16)
-tt.perplexity(              'SmolLM-360M_flashNorm', arch='LlamaFlashNorm', speedup=16)
+tt.perplexity('HuggingFaceTB/SmolLM-135M',              speedup=16)
+tt.perplexity(              'SmolLM-135M_flashNorm',   speedup=16)
+tt.perplexity('HuggingFaceTB/SmolLM-360M',              speedup=16)
+tt.perplexity(              'SmolLM-360M_flashNorm',   speedup=16)
+
+# -- strict mode: norm tensors deleted, requires custom LlamaFlashNorm arch --
+tt.flashify_repo('HuggingFaceTB/SmolLM-135M', strict=True)
+tt.flashify_repo('HuggingFaceTB/SmolLM-360M', strict=True)
+
+tt.hello_world('SmolLM-135M_flashNorm', arch='LlamaFlashNorm')
+tt.hello_world('SmolLM-360M_flashNorm', arch='LlamaFlashNorm')
+tt.perplexity('SmolLM-135M_flashNorm', arch='LlamaFlashNorm', speedup=16)
+tt.perplexity('SmolLM-360M_flashNorm', arch='LlamaFlashNorm', speedup=16)
 #tt.perplexity('HuggingFaceTB/SmolLM-1.7B',           speedup=64)
 #tt.perplexity(              'SmolLM-1.7B_flashNorm', speedup=64)
 #tt.perplexity('microsoft/Phi-3-mini-4k-instruct',           speedup=64, bars=True)

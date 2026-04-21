@@ -1,6 +1,6 @@
 # tricks and tools for speeding up LLMs
 
-import gc, os, time, torch, datasets, glob
+import gc, os, time, torch, datasets, glob, shutil
 import torch.nn as nn
 from tqdm import tqdm
 from huggingface_hub import snapshot_download, repo_exists
@@ -75,9 +75,30 @@ def get_param(repo, get_meta=False):
 
 
 def save_repo(repo, param, config, dir):
-  """save tokenizer, config, and param in local dir"""
-  tok = AutoTokenizer.from_pretrained(repo)
-  tok.save_pretrained(dir, from_pt=True)
+  """save tokenizer, config, and param in local dir.
+
+  Copies the source tokenizer files verbatim (instead of roundtripping through
+  AutoTokenizer) to preserve format compatibility across transformers versions
+  -- a roundtrip via transformers 5.x produces a tokenizer_config.json that
+  transformers 4.x cannot parse, breaking stock vLLM loading."""
+  os.makedirs(dir, exist_ok=True)
+  if repo_exists(repo):
+    # download tokenizer files to a sibling temp dir, then copy just the files
+    # (snapshot_download creates a .cache/ subdir that we exclude from `dir`)
+    tmp = dir + '_tok_src'
+    snapshot_download(repo_id=repo,
+                      allow_patterns=['tokenizer*', 'special_tokens_map*',
+                                      'vocab*', 'merges*', 'chat_template*'],
+                      local_dir=tmp)
+    for f in os.listdir(tmp):
+      src = os.path.join(tmp, f)
+      if os.path.isfile(src) and not f.startswith('.'):
+        shutil.copy2(src, dir)
+    shutil.rmtree(tmp)
+  else:
+    # local source dir; fall back to AutoTokenizer roundtrip
+    tok = AutoTokenizer.from_pretrained(repo)
+    tok.save_pretrained(dir, from_pt=True)
   config.save_pretrained(dir, from_pt=True)
   save_file(param, dir + '/model.safetensors', metadata={'format': 'pt'})
 
@@ -86,12 +107,17 @@ def save_repo(repo, param, config, dir):
 # functions for flashNorm, see paper https://arxiv.org/abs/2407.09577
 #-------------------------------------------------------------------------------------
 def merge_norm_proj(param, norm, proj, layer=0):
-  """merge norm weights into projection weights"""
+  """merge norm weights into projection weights.
+
+  Computes the merge in float32 (the product of bf16 × fp32 fits exactly in
+  fp32's 24-bit mantissa) and casts the result back to the projection's
+  original dtype so the stored checkpoint matches config.dtype."""
   n_key = weight(norm, layer)
   p_key = weight(proj, layer)
-  param[p_key] = nn.Parameter(param[p_key] @ torch.diag(param[n_key])).detach()  # flipped order
-  # TODO: consider first converting to float64, then merge norm into projections,
-  # and then convert back to float32. Example: torch.ones(4, dtype=torch.float32)
+  orig_dtype = param[p_key].dtype
+  w = param[p_key].to(torch.float32)
+  g = param[n_key].to(torch.float32)
+  param[p_key] = nn.Parameter((w @ torch.diag(g)).to(orig_dtype)).detach()
 
 
 def set_norm_one(param, norm, layer=0):
@@ -135,8 +161,25 @@ def flashify(param, config, bars):
       set_norm_one(param, 'Hnorm')
 
 
-def flashify_repo(repo, dir=None, bars=False, test=True):
-  """convert LLM repo to flashNorm, store the new model in local dir"""
+def flashify_repo(repo, dir=None, bars=False, strict=False, test=None):
+  """convert LLM repo to flashNorm, store the new model in local dir.
+
+  Default (strict=False, 'compat mode'): norm weights are folded into
+  projection weights but kept in the state dict as all-ones tensors. The
+  resulting checkpoint loads in stock transformers and vLLM as a regular
+  model of the source architecture with no code changes.
+
+  strict=True: norm weight tensors are deleted from the state dict, producing
+  a smaller checkpoint that requires custom modeling code (e.g.
+  LlamaFlashNorm) to load.
+
+  Legacy `test=...` mode (preserved for backward compatibility with pre-
+  compat-mode callers): when `test` is passed explicitly, this function
+  reproduces the old behavior exactly. test=True writes a companion
+  '*_test' directory with norm tensors kept as all-ones; either test=True
+  or test=False also makes the main output at `dir` strict (norm tensors
+  deleted), matching the pre-compat-mode main-output behavior. When `test`
+  is not passed, the new `strict` argument controls behavior."""
   with torch.no_grad():  # prevent autograd from tracking changes
 
     if dir == None:  # append '_flashNorm' if no output dir is defined
@@ -146,20 +189,22 @@ def flashify_repo(repo, dir=None, bars=False, test=True):
     config = AutoConfig.from_pretrained(repo)
     param = get_param(repo)
     flashify(param, config, bars)
-    if test:  # optionally, save a test-repo in directory *_test
+
+    # Legacy test=True writes a companion '*_test' directory with norms kept
+    # as all-ones (pre-compat-mode behavior).
+    if test is True:
       save_repo(repo, param, config, dir + '_test')
 
-    # delete norm weights from param
-    for layer in range(config.num_hidden_layers):
-      del param[weight('Inorm', layer)]
-      del param[weight('Anorm', layer)]
-    if config.tie_word_embeddings == False:
-      del param[weight('Hnorm')]
+    # Main output is strict when user passes strict=True or any legacy
+    # `test=...` argument (the pre-compat-mode main output was always strict
+    # regardless of test's value).
+    if strict or test is not None:
+      for layer in range(config.num_hidden_layers):
+        del param[weight('Inorm', layer)]
+        del param[weight('Anorm', layer)]
+      if config.tie_word_embeddings == False:
+        del param[weight('Hnorm')]
 
-   # TODO:
-    #config.architectures = ['LlamaForCausalLM_flashNorm']
-    #config.auto_map = {'AutoModelForCausalLM': 'flashNorm_modeling_llama.LlamaForCausalLM_flashNorm'}
-    #config.model_type = 'flashNorm'
     save_repo(repo, param, config, dir)
 
     del param; gc.collect()  # run garbage collection

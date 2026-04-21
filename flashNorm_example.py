@@ -10,27 +10,28 @@ tt.quiet_hf()  # calm down HuggingFace
 
 # %%
 #-------------------------------------------------------------------------------
-# Example 1
-#-------------------------------------------------------------------------------
-
-# convert model and store the new model in ./SmolLM-135M_flashNorm_test
-tt.flashify_repo('HuggingFaceTB/SmolLM-135M')
-
-# run example inference of original and modified model
-tt.hello_world('HuggingFaceTB/SmolLM-135M')
-tt.hello_world('./SmolLM-135M_flashNorm_test')
-
-# measure perplexity of original and modified model
-tt.perplexity('HuggingFaceTB/SmolLM-135M', speedup=16)
-tt.perplexity('./SmolLM-135M_flashNorm_test', speedup=16)
-
-# %%
-#-------------------------------------------------------------------------------
-# Example 2
+# Example 1: compat mode (default), loads with stock AutoModelForCausalLM
 #-------------------------------------------------------------------------------
 
 # convert model and store the new model in ./SmolLM-135M_flashNorm
 tt.flashify_repo('HuggingFaceTB/SmolLM-135M')
+
+# run example inference of original and modified model
+tt.hello_world('HuggingFaceTB/SmolLM-135M')
+tt.hello_world('./SmolLM-135M_flashNorm')
+
+# measure perplexity of original and modified model
+tt.perplexity('HuggingFaceTB/SmolLM-135M', speedup=16)
+tt.perplexity('./SmolLM-135M_flashNorm', speedup=16)
+
+# %%
+#-------------------------------------------------------------------------------
+# Example 2: strict mode, norm tensors deleted, requires the custom
+# LlamaFlashNorm modeling class to load
+#-------------------------------------------------------------------------------
+
+# convert model (strict=True deletes norm tensors from the state dict)
+tt.flashify_repo('HuggingFaceTB/SmolLM-135M', strict=True)
 
 # run example inference of original and modified model
 tt.hello_world('HuggingFaceTB/SmolLM-135M')
