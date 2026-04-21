@@ -581,7 +581,7 @@ currently negates the speedup, motivating native kernel-level integration as the
 primary direction for future work.
 % TODO: perhaps modify above sentence, just say we need a native fused kernel for flashNorm
 
-A CUTLASS-backed fused \texttt{RMSNorm+linear} kernel targeting vLLM~\citep{vLLM} integration is under active development, directly extending the A100 prototype of Appendix~\ref{app:a100}; the goal is to preserve the fusion savings at Llama-family production scales where the Triton prototype is limited by matmul codegen quality. Further integration targets include
+A CUTLASS 3.x Sm90 fused \texttt{RMSNorm+linear} kernel built on NVIDIA's production \texttt{CollectiveBuilder} and Epilogue Visitor Tree templates (Appendix~\ref{app:h100-cutlass}) confirms that the fusion pattern transfers to production-grade Sm90 infrastructure. Against the HuggingFace baseline the prototype wins on all 18 shapes; against the optimized flashinfer baseline it wins on 10 of 18 (all SmolLM2 and Llama-3.2-1B decode shapes), with the remaining 8 losses attributable to a single non-specialized tile choice in the prototype. Closing that gap requires shape-specialized tile dispatch and a custom \texttt{CollectiveMainloop} that fuses the RMS accumulation into the matmul's existing tile load, both routine kernel-team work inside production inference frameworks. Landing this kernel into vLLM~\citep{vLLM} is the natural next step. Further integration targets include
 SGLang~\citep{sglang}, FlashInfer~\citep{flashInfer},
 HuggingFace Transformers~\citep{HFtransformers},
 llama.cpp~\citep{llama-cpp}, whisper.cpp~\citep{whisper-cpp},
@@ -720,6 +720,56 @@ Llama-3.1-8B & 16  & 0.081\,ms & 0.074\,ms & $+$8.5\% \\
 \end{table}
 
 Five of six decode data points (three model scales across $M \in \{1, 16\}$) deliver positive speedup, with the remaining Llama-3.1-8B $M{=}1$ row at parity within measurement noise, confirming that the fusion hypothesis translates to wall-clock wins at the token counts most relevant to production inference. The gap at Llama-3.1-8B $M{=}1$ is attributable to cuBLAS's specialized gemv heuristic path which our uniform-warp kernel cannot match without warp-specialized producer/consumer scheduling. A CUTLASS-based integration in production inference stacks, with warp specialization already present in their kernel infrastructure, would close this remaining gap. The kernel source and reproducibility notebook are available in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_cutlass\_kernel.ipynb}}.
+
+\subsection{H100 validation: CUTLASS 3.x Sm90 production kernel}\label{app:h100-cutlass}
+
+To verify that the fusion pattern transfers to production-grade Sm90 infrastructure, we extend the A100 prototype to a CUTLASS 3.x Sm90 kernel built from the \texttt{CollectiveBuilder} and Epilogue Visitor Tree (EVT) templates NVIDIA ships for Hopper. The kernel uses TMA for HBM-to-shared bulk loads, WGMMA for $64{\times}128{\times}16$ cooperative tensor-core matmul, and the hardware \texttt{mbarrier} primitive for producer-consumer warpgroup synchronization. A small pre-pass kernel computes $\mathrm{inv\_rms}[m]$ and both kernels are captured into a single CUDA Graph, collapsing the host-visible dispatch to one \texttt{cudaGraphLaunch} per call. The per-row scaling is fused into the GEMM epilogue via the \texttt{Sm90ColBroadcast} EVT node. We measure against two realistic baselines: the HuggingFace Transformers path (\texttt{torch.nn.functional.rms\_norm} followed by cuBLAS matmul), and an optimized path using \texttt{flashinfer.norm.rmsnorm}~\citep{flashInfer} (the fused RMS kernel vLLM and SGLang use internally) followed by cuBLAS matmul. Table~\ref{tab:h100-full} reports the full 18-shape benchmark.
+
+\begin{table}[h!] \centering
+\caption{H100 fused FlashNorm kernel (CUTLASS 3.x Sm90 \texttt{CollectiveBuilder} with EVT, CUDA-graph captured) vs two realistic baselines: HuggingFace (\texttt{torch.nn.functional.rms\_norm} plus cuBLAS) and flashinfer (\texttt{flashinfer.norm.rmsnorm} plus cuBLAS). fp16 inputs, averaged over 100 iterations after 20 warmup. Shapes $(n, k)$ as in Table~\ref{tab:a100-full}.}
+\label{tab:h100-full}
+\small
+\begin{tabular}{l r r r r r r}
+\hline
+Model & Tokens & HF (ms) & flashinfer (ms) & V12 (ms) & vs HF & vs flashinfer \\
+\hline
+SmolLM2-135M & 1    & 0.096 & 0.038 & 0.019 & $+$80.4\% & $+$50.6\% \\
+SmolLM2-135M & 16   & 0.096 & 0.039 & 0.019 & $+$80.4\% & $+$51.3\% \\
+SmolLM2-135M & 64   & 0.097 & 0.038 & 0.019 & $+$80.6\% & $+$50.6\% \\
+SmolLM2-135M & 256  & 0.097 & 0.039 & 0.019 & $+$80.5\% & $+$51.3\% \\
+SmolLM2-135M & 1024 & 0.089 & 0.034 & 0.016 & $+$82.0\% & $+$52.2\% \\
+SmolLM2-135M & 4096 & 0.079 & 0.035 & 0.021 & $+$74.1\% & $+$42.0\% \\
+\hline
+Llama-3.2-1B & 1    & 0.071 & 0.027 & 0.021 & $+$70.9\% & $+$23.3\% \\
+Llama-3.2-1B & 16   & 0.065 & 0.026 & 0.021 & $+$68.0\% & $+$18.7\% \\
+Llama-3.2-1B & 64   & 0.066 & 0.025 & 0.021 & $+$68.2\% & $+$17.6\% \\
+Llama-3.2-1B & 256  & 0.065 & 0.026 & 0.021 & $+$67.5\% & $+$17.1\% \\
+Llama-3.2-1B & 1024 & 0.072 & 0.026 & 0.037 & $+$48.5\% & $-$44.8\% \\
+Llama-3.2-1B & 4096 & 0.221 & 0.075 & 0.100 & $+$54.7\% & $-$32.8\% \\
+\hline
+Llama-3.1-8B & 1    & 0.065 & 0.026 & 0.043 & $+$34.2\% & $-$65.7\% \\
+Llama-3.1-8B & 16   & 0.065 & 0.026 & 0.040 & $+$38.5\% & $-$54.1\% \\
+Llama-3.1-8B & 64   & 0.065 & 0.027 & 0.039 & $+$39.7\% & $-$47.8\% \\
+Llama-3.1-8B & 256  & 0.074 & 0.032 & 0.040 & $+$45.8\% & $-$24.8\% \\
+Llama-3.1-8B & 1024 & 0.150 & 0.079 & 0.096 & $+$36.4\% & $-$20.3\% \\
+Llama-3.1-8B & 4096 & 0.565 & 0.293 & 0.405 & $+$28.3\% & $-$38.1\% \\
+\hline
+\end{tabular}
+\end{table}
+
+All 18 shapes deliver positive speedup versus the HuggingFace path ($+$28\% to $+$82\%). Against the optimized flashinfer plus cuBLAS baseline, V12 wins on 10 of 18 shapes: all SmolLM2-135M scales ($+$42\% to $+$52\%) and Llama-3.2-1B decode ($M \leq 256$, $+$17\% to $+$23\%). V12 loses on 8 shapes: Llama-3.2-1B compute-bound ($M \geq 1024$, $-$33\% to $-$45\%) and all Llama-3.1-8B rows ($-$20\% to $-$66\%). The honest interpretation follows from the two-source decomposition: at scales where Source~B's $15$--$25\,\mu$s fusion saving is a meaningful fraction of call time (SmolLM2 and Llama-1B decode), V12 wins decisively against both baselines; at larger Llama-family shapes, flashinfer's fused RMS kernel is already fast enough ($25$--$80\,\mu$s) that V12's fusion saving is smaller than the matmul penalty incurred by a non-specialized tile selection. The kernel source and reproducibility notebook, including the flashinfer baseline and decomposed-timing sanity check, are in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_cutlass\_kernel\_sm90.ipynb}}.
+
+\paragraph{Where the losses come from.} The 8 losing rows share a single root cause: V12 instantiates a single \texttt{CollectiveBuilder} variant with \texttt{TileShape}$=\langle 128, 128, 64 \rangle$, which is reasonable for prefill at small to medium scales but suboptimal in two regimes. First, at Llama-3.1-8B decode ($M{=}1$) the tile pads to 128 rows while only one row carries real data, wasting $127/128$ of the tensor-core work; cuBLAS has a specialized gemv heuristic that does not incur this padding. Second, at Llama-family compute-bound shapes cuBLAS selects a differently shaped tile (for instance $256{\times}128$) that achieves higher SM occupancy and cache efficiency than our $128{\times}128$ default. In both regimes the fusion saving is real but is smaller than the matmul-quality gap from a non-specialized tile. This mirrors exactly the two-source decomposition of Appendix~\ref{app:a100}: fusion savings are a fixed per-call quantity, and whether they yield a net win depends on how close the fused matmul runs to the vendor-optimal matmul at that specific shape.
+
+\paragraph{Production path to universal wins.} Closing the Llama-family gap requires two additions within the same CUTLASS 3.x framework, both standard kernel-team work inside production inference stacks.
+
+\textit{(i) Shape-specialized tile dispatch.} Multiple \texttt{CollectiveBuilder} instantiations with different \texttt{TileShape} variants (e.g.\ $\langle 16, 128, 64 \rangle$ for decode, $\langle 128, 128, 64 \rangle$ for transitional, $\langle 256, 128, 64 \rangle$ for compute-bound prefill), dispatched by $(M, K, N)$ at runtime. This is the same pattern as the Triton prototype's two-condition dispatch (Section~\ref{app:a100}) and as cuBLAS's own internal heuristic. Engineering effort, approximately one week for a CUTLASS-familiar engineer.
+
+\textit{(ii) Custom \texttt{CollectiveMainloop} with in-line RMS accumulation.} Fuse $\sum_k x^2_{m,k}$ into the matmul's producer warpgroup during the existing tile-load phase, removing the pre-pass kernel entirely. The mainloop reads $x$ from HBM regardless; accumulating $x^2$ costs register operations, not additional memory traffic. CUTLASS 3.x supports this via template extension of \texttt{CollectiveMmaFma}; a 400-line reference design accompanies the prototype notebook. Engineering effort, approximately two to four weeks.
+
+With these two additions in place, the kernel would extend the measured small-scale wins of Table~\ref{tab:h100-full} to Llama-family production scales. Both additions sit within vLLM's~\citep{vLLM} existing CUTLASS infrastructure, which routinely maintains shape-specific tile dispatch for its matmul fast paths. This is the engineering scope the paper positions as the natural next step for production integration.
+
+\paragraph{End-to-end production throughput.} The measurements in Table~\ref{tab:h100-full} are operation-level times for a single fused $\mathrm{RMSNorm}+\mathrm{linear}$ call. A complete end-to-end picture requires integrating the tile-dispatched fused op into the inference server's model execution graph at both the \texttt{input\_layernorm}$\to$\texttt{qkv\_proj} and \texttt{post\_attention\_layernorm}$\to$\texttt{gate\_up\_proj} dispatch sites, then measuring the tokens-per-second impact on representative serving workloads. This paper establishes the mathematics (Propositions~\ref{prop:weightless} and~\ref{prop:commute}), the quality preservation across scales (Table~\ref{tab:quality}), and the measured operation-level validation on T4, A100, and H100. The end-to-end throughput measurement belongs to the production integration that this work is designed to enable.
 
 \bibliographystyle{unsrtnat}
 \bibliography{references}
