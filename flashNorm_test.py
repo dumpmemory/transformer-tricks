@@ -11,11 +11,17 @@ tt.quiet_hf()  # calm down HuggingFace
 # -- compat mode: checkpoint loads with stock AutoModelForCausalLM --
 tt.flashify_repo('HuggingFaceTB/SmolLM-135M')
 tt.flashify_repo('HuggingFaceTB/SmolLM-360M')
+#tt.flashify_repo('HuggingFaceTB/SmolLM-1.7B', bars=True)
+#tt.flashify_repo('microsoft/Phi-3-mini-4k-instruct', bars=True)
 
 tt.hello_world('HuggingFaceTB/SmolLM-135M')
 tt.hello_world(              'SmolLM-135M_flashNorm')
 tt.hello_world('HuggingFaceTB/SmolLM-360M')
 tt.hello_world(              'SmolLM-360M_flashNorm')
+#tt.hello_world('HuggingFaceTB/SmolLM-1.7B')
+#tt.hello_world(              'SmolLM-1.7B_flashNorm')
+#tt.hello_world('microsoft/Phi-3-mini-4k-instruct')
+#tt.hello_world(          'Phi-3-mini-4k-instruct_flashNorm')
 
 tt.perplexity('HuggingFaceTB/SmolLM-135M',              speedup=16)
 tt.perplexity(              'SmolLM-135M_flashNorm',   speedup=16)
