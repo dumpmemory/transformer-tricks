@@ -230,6 +230,10 @@ In this case, Proposition~\ref{prop:weightless} (weightless normalization) still
 applies, but the normalization must precede the bias addition.
 \end{remark}
 
+\begin{remark}[Unfolded case]\label{rem:unfolded}
+The commutativity in Proposition~\ref{prop:commute} depends only on $1/\mathrm{RMS}(\mathbf{a})$ being a scalar per token; it holds identically if $\mathbf{W}^*$ is replaced by the unfolded $\mathbf{W}$. Deferred normalization can therefore be applied at runtime to any RMSNorm-based model without modifying its checkpoint. Propositions~\ref{prop:weightless} and~\ref{prop:commute} are thus independent transformations that can be adopted separately or together: a framework that implements deferred normalization alone delivers the parallel-execution and fused-kernel speedups (Corollary~\ref{cor:parallel} and Appendix~\ref{app:a100}) to every existing RMSNorm-based checkpoint, without requiring a weight-folded variant.
+\end{remark}
+
 \begin{corollary}[Parallel execution]\label{cor:parallel}
 Under the conditions of Proposition~\ref{prop:commute}, computing
 $\mathbf{a}\mathbf{W}^*$ and $\mathrm{RMS}(\mathbf{a})$ are \emph{independent}
