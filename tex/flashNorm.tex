@@ -35,7 +35,8 @@
 \def\cosi{\cos{(\cdot)}}              % cos(.)
 \def\sini{\sin{(\cdot)}}              % sin(.)
 
-\title{FlashNorm: Fast and Exact Normalization for Transformers}
+\title{FlashNorm: Fast Normalization for Transformers}
+%\title{FlashNorm: Fast and Exact Normalization for Transformers}
 %\title{FlashNorm: fast normalization for LLMs}
 %\title{Flash normalization: fast normalization for LLMs}
 %\title{Flash normalization: fast RMSNorm for LLMs}
@@ -60,9 +61,9 @@ with GLU variants, and RoPE-based attention.
 On an NVIDIA T4 GPU, FlashNorm achieves \textbf{33--35\%}
 lower latency on the norm-then-project operation in the compute-bound (prefill)
 regime at SmolLM2-135M scale, and \textbf{12--14\%} at Llama-7B scale. We verify
-zero-loss weight folding on SmolLM2-135M, Llama-3.2-1B, and Llama-3.1-8B, and
-release three public compatibility checkpoints that load unmodified in stock
-HuggingFace Transformers and vLLM.
+zero-loss weight folding on SmolLM2-135M, Llama-3.2-1B, and Llama-3.1-8B.
+% and release three public compatibility checkpoints that load unmodified in stock
+% HuggingFace Transformers and vLLM.
 Beyond inference speed, FlashNorm
 simplifies model implementations by reducing parameter tensor count, analogous to
 the simplification achieved by PaLM's removal of bias-parameters from all linear layers.
@@ -95,7 +96,8 @@ RMS value must be fully computed \emph{before} the linear layer can begin, becau
 the normalized activations are its input. The matrix unit therefore sits idle during
 the RMS calculation, a bottleneck that compounds across all transformer layers and inference calls.
 
-For GPUs, the bottleneck is most acute in the autoregressive decode regime that dominates production inference serving. At batch size one, each transformer layer launches two small, memory-bound kernels (RMSNorm followed by a linear projection), and the fixed per-launch overhead compounds across all layers and all generated tokens. Production inference engines such as vLLM~\citep{vLLM}, SGLang~\citep{sglang}, and TensorRT-LLM mitigate this with fused \texttt{RMSNorm+linear} kernels that read the activation from HBM once and keep the intermediate in cache. These fused kernels assume the standard RMSNorm-then-project dataflow; a FlashNorm-folded checkpoint loads correctly but cannot exploit the fused fast path without engine-side changes. Bridging this gap, while preserving exact mathematical equivalence to the original model, is the practical problem we address.
+% TODO: is it ok to remove below?
+%For GPUs, the bottleneck is most acute in the autoregressive decode regime that dominates production inference serving. At batch size one, each transformer layer launches two small, memory-bound kernels (RMSNorm followed by a linear projection), and the fixed per-launch overhead compounds across all layers and all generated tokens. Production inference engines such as vLLM~\citep{vLLM}, SGLang~\citep{sglang}, and TensorRT-LLM mitigate this with fused \texttt{RMSNorm+linear} kernels that read the activation from HBM once and keep the intermediate in cache. These fused kernels assume the standard RMSNorm-then-project dataflow; a FlashNorm-folded checkpoint loads correctly but cannot exploit the fused fast path without engine-side changes. Bridging this gap, while preserving exact mathematical equivalence to the original model, is the practical problem we address.
 
 We address this bottleneck with \textbf{FlashNorm}, which makes two
 mathematically equivalent transformations to the RMSNorm-then-project pipeline shown in
@@ -122,11 +124,24 @@ DyT~\citep{DyT}, GLU-variant FFNs~\citep{GLU}, and RoPE-based attention~\citep{R
 
 \paragraph{Contributions.}
 \begin{itemize}
-  \item \textbf{Exact reformulation.} Two commutativity results (Propositions~\ref{prop:weightless} and~\ref{prop:commute}) characterize when weight folding and deferred scaling preserve the bias-free RMSNorm-then-project computation.
-  \item \textbf{Unified coverage.} The same transformations extend to LayerNorm, Dynamic Tanh~\citep{DyT}, GLU-variant FFNs~\citep{GLU}, and RoPE-based attention~\citep{RoPE} including QK-normalization.
-  \item \textbf{Quality and GPU evidence at three model scales and three GPU generations.} We verify zero-loss folding on SmolLM2-135M, Llama-3.2-1B, and Llama-3.1-8B across wikitext, MMLU, and HellaSwag (Table~\ref{tab:quality}), and report operation-level speedups on T4, A100 (Triton prototype in Section~\ref{sec:a100-fused} and fused WMMA decode wins in Appendix~\ref{app:a100-decode}), and H100 (CUTLASS 3.x Sm90 reference benchmarked against HuggingFace and flashinfer~\citep{flashInfer} in Appendix~\ref{app:h100-cutlass}).
-  \item \textbf{Public artifacts and production path.} We release three public compatibility checkpoints that load unmodified in stock HuggingFace Transformers and vLLM. We also identify the specific kernel-engineering work required (shape-specialized tile dispatch and custom \texttt{CollectiveMainloop}) to extend fusion wins to Llama-family compute-bound regimes, and provide a reference design for that extension.
+  \item We formally characterize the commutativity of RMSNorm with
+        matrix multiplication (Proposition~\ref{prop:commute}) and derive
+        the exact conditions under which deferred normalization holds.
+  \item We present FlashNorm as a unified framework covering RMSNorm, LayerNorm,
+        DyT, GLU-FFNs, and attention with RoPE.
+ %\item We provide a complete hardware timing analysis demonstrating the bottleneck
+ %      that FlashNorm eliminates.
+  \item We verify zero-loss weight-folding on SmolLM2-135M, Llama-3.2-1B, and
+        Llama-3.1-8B across wikitext, MMLU, and HellaSwag (Table~\ref{tab:quality}),
+        and report operation-level speedups on T4, A100, and H100.
+  \item And we identify the kernel-engineering work required to extend to
+        compute-bound regimes and provide a reference design.
 \end{itemize}
+% previous version:
+%  \item \textbf{Exact reformulation.} Two commutativity results (Propositions~\ref{prop:weightless} and~\ref{prop:commute}) characterize when weight folding and deferred scaling preserve the bias-free RMSNorm-then-project computation.
+%  \item \textbf{Unified coverage.} The same transformations extend to LayerNorm, Dynamic Tanh~\citep{DyT}, GLU-variant FFNs~\citep{GLU}, and RoPE-based attention~\citep{RoPE} including QK-normalization.
+%  \item \textbf{Quality and GPU evidence at three model scales and three GPU generations.} We verify zero-loss folding on SmolLM2-135M, Llama-3.2-1B, and Llama-3.1-8B across wikitext, MMLU, and HellaSwag (Table~\ref{tab:quality}), and report operation-level speedups on T4, A100 (Triton prototype in Section~\ref{sec:a100-fused} and fused WMMA decode wins in Appendix~\ref{app:a100-decode}), and H100 (CUTLASS 3.x Sm90 reference benchmarked against HuggingFace and flashinfer~\citep{flashInfer} in Appendix~\ref{app:h100-cutlass}).
+%  \item \textbf{Public artifacts and production path.} We release three public compatibility checkpoints that load unmodified in stock HuggingFace Transformers and vLLM. We also identify the specific kernel-engineering work required (shape-specialized tile dispatch and custom \texttt{CollectiveMainloop}) to extend fusion wins to Llama-family compute-bound regimes, and provide a reference design for that extension.
 
 \section{Background and Related Work}
 
@@ -561,14 +576,14 @@ either fixed-point or floating-point weights, which inherently mitigates this ri
 %\paragraph{TODO: Epsilon and numerical precision.}
 %The $\varepsilon$-RMS variant $\mathrm{RMS}_\varepsilon(\mathbf{a}) = \sqrt{\varepsilon + \frac{1}{n}\sum a_i^2}$ breaks exact scale-invariance: $\mathrm{RMS}_\varepsilon(s \cdot \mathbf{a}) \neq s \cdot \mathrm{RMS}_\varepsilon(\mathbf{a})$. However, $\varepsilon$ only has practical effect when $\mathrm{RMS}(\mathbf{a}) \ll \sqrt{\varepsilon}$, i.e., for near-zero activation vectors. In this regime the epsilon's role is to bound the magnitude of the scaling factor, not to preserve normalization fidelity, so the approximation is benign. Appendix~\ref{app:epsilon} provides the full derivation.
 
+%\paragraph{Two sources of speedup.}
+%FlashNorm's speedup decomposes into two mathematically independent sources. Weight-fold savings (Proposition~\ref{prop:weightless}) eliminate the per-channel multiply by $\mathbf{g}$ inside the RMSNorm kernel; this source is universal and architecture-agnostic, but modest in absolute magnitude. Kernel-fusion savings eliminate one kernel launch, one intermediate activation allocation, and an HBM round-trip on the normalized activations, yielding a fixed per-call reduction of approximately 15 to 25\,$\mu$s on modern GPUs that is independent of model scale. The T4 results of Section~\ref{sec:experiments} isolate the fusion source via adaptive CUDA streaming; the A100 prototype of Section~\ref{sec:a100-fused} realizes both sources inside a single kernel. Appendix~\ref{app:a100} provides a quantitative decomposition and analyzes when each source is observable as a net speedup in the presence of the vendor's tuned matmul kernels.
+
 \paragraph{Simplification as a primary benefit.}
 Beyond raw speed, FlashNorm simplifies model implementations in a manner analogous
 to RMSNorm's simplification over LayerNorm, or PaLM's removal of linear-layer
 biases~\citep{PaLM}. Fewer parameter tensors mean smaller checkpoint
 files, simpler loading logic, and reduced risk of implementation bugs.
-
-\paragraph{Two sources of speedup.}
-FlashNorm's speedup decomposes into two mathematically independent sources. Weight-fold savings (Proposition~\ref{prop:weightless}) eliminate the per-channel multiply by $\mathbf{g}$ inside the RMSNorm kernel; this source is universal and architecture-agnostic, but modest in absolute magnitude. Kernel-fusion savings eliminate one kernel launch, one intermediate activation allocation, and an HBM round-trip on the normalized activations, yielding a fixed per-call reduction of approximately 15 to 25\,$\mu$s on modern GPUs that is independent of model scale. The T4 results of Section~\ref{sec:experiments} isolate the fusion source via adaptive CUDA streaming; the A100 prototype of Section~\ref{sec:a100-fused} realizes both sources inside a single kernel. Appendix~\ref{app:a100} provides a quantitative decomposition and analyzes when each source is observable as a net speedup in the presence of the vendor's tuned matmul kernels.
 
 \section{Conclusion}
 We presented FlashNorm, a mathematically exact reformulation of RMSNorm-then-project
