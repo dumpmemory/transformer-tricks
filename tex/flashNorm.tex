@@ -236,6 +236,13 @@ $(\alpha \mathbf{a})\mathbf{W}^* = (\mathbf{a}\mathbf{W}^*) \alpha$ for any scal
 $\alpha$. Setting $\alpha = 1/\mathrm{RMS}(\mathbf{a})$ gives the result.
 \end{proof}
 
+\begin{corollary}[Parallel execution]\label{cor:parallel}
+Under the conditions of Proposition~\ref{prop:commute}, computing
+$\mathbf{a}\mathbf{W}^*$ and $\mathrm{RMS}(\mathbf{a})$ are \emph{independent}
+computations that may proceed in parallel. The final result requires only a single
+vector-scalar multiply after both complete.
+\end{corollary}
+
 \begin{remark}[Bias case]
 If the linear layer has a bias $\mathbf{c} \in \mathbb{R}^k$, deferred normalization
 does not hold directly because
@@ -243,18 +250,14 @@ $(\mathbf{a}\mathbf{W}^* + \mathbf{c}) / \mathrm{RMS}(\mathbf{a}) \neq
  \mathbf{a}\mathbf{W}^*/\mathrm{RMS}(\mathbf{a}) + \mathbf{c}$.
 In this case, Proposition~\ref{prop:weightless} (weightless normalization) still
 applies, but the normalization must precede the bias addition.
+% TODO(nils): clarify that in this case we can still compute RMS and matmul in parallel!
 \end{remark}
 
-\begin{remark}[Unfolded case]\label{rem:unfolded}
-The commutativity in Proposition~\ref{prop:commute} depends only on $1/\mathrm{RMS}(\mathbf{a})$ being a scalar per token; it holds identically if $\mathbf{W}^*$ is replaced by the unfolded $\mathbf{W}$. Deferred normalization can therefore be applied at runtime to any RMSNorm-based model without modifying its checkpoint. Propositions~\ref{prop:weightless} and~\ref{prop:commute} are thus independent transformations that can be adopted separately or together: a framework that implements deferred normalization alone delivers the parallel-execution and fused-kernel speedups (Corollary~\ref{cor:parallel} and Appendix~\ref{app:a100}) to every existing RMSNorm-based checkpoint, without requiring a weight-folded variant.
+\begin{remark}[Unfolded case]
+Proposition~\ref{prop:commute} requires only that $1/\mathrm{RMS}(\mathbf{a})$ be a per-token scalar, so deferred normalization applies equally to the original $\mathbf{W}$. Propositions~\ref{prop:weightless} and~\ref{prop:commute} are therefore independent: a framework implementing deferred normalization alone obtains the parallel-execution and fused-kernel speedups (Corollary~\ref{cor:parallel} and Appendix~\ref{app:a100}) for any existing RMSNorm checkpoint, with no weight-folding required.
+% before:
+%The commutativity in Proposition~\ref{prop:commute} depends only on $1/\mathrm{RMS}(\mathbf{a})$ being a scalar per token; it holds identically if $\mathbf{W}^*$ is replaced by the unfolded $\mathbf{W}$. Deferred normalization can therefore be applied at runtime to any RMSNorm-based model without modifying its checkpoint. Propositions~\ref{prop:weightless} and~\ref{prop:commute} are thus independent transformations that can be adopted separately or together: a framework that implements deferred normalization alone delivers the parallel-execution and fused-kernel speedups (Corollary~\ref{cor:parallel} and Appendix~\ref{app:a100}) to every existing RMSNorm-based checkpoint, without requiring a weight-folded variant.
 \end{remark}
-
-\begin{corollary}[Parallel execution]\label{cor:parallel}
-Under the conditions of Proposition~\ref{prop:commute}, computing
-$\mathbf{a}\mathbf{W}^*$ and $\mathrm{RMS}(\mathbf{a})$ are \emph{independent}
-computations that may proceed in parallel. The final result requires only a single
-vector-scalar multiply after both complete.
-\end{corollary}
 
 Figure~\ref{fig1} illustrates the three mathematically equivalent
 implementations: (a) standard RMSNorm-then-project, (b) weightless normalization,
@@ -519,6 +522,19 @@ FlashNorm uses adaptive dispatch: the parallel path is used only when the GEMM i
 %the primary advantage, not latency. Practitioners should benchmark their specific
 %hardware and batch size before deploying the parallel-stream variant in production.
 
+\paragraph{Relationship to quantization.}
+FlashNorm is orthogonal to weight quantization. In fact, folding normalization
+weights into $\mathbf{W}^*$ before quantization can improve quantization quality
+by absorbing per-channel scale factors directly into the weight distribution,
+a technique already used in practice (e.g., SmoothQuant~\citep{smoothQuant}). We leave a systematic
+study of this interaction to future work.
+
+\paragraph{Activation dynamic range.}
+For implementations utilizing low-precision fixed-point activations, FlashNorm’s deferred
+normalization may trigger overflows during matrix multiplication, as noted in \citep{MXNorm}.
+However, the majority of contemporary frameworks employ floating-point activations alongside
+either fixed-point or floating-point weights, which inherently mitigates this risk.
+
 %\paragraph{TODO: Epsilon and numerical precision.}
 %The $\varepsilon$-RMS variant $\mathrm{RMS}_\varepsilon(\mathbf{a}) = \sqrt{\varepsilon + \frac{1}{n}\sum a_i^2}$ breaks exact scale-invariance: $\mathrm{RMS}_\varepsilon(s \cdot \mathbf{a}) \neq s \cdot \mathrm{RMS}_\varepsilon(\mathbf{a})$. However, $\varepsilon$ only has practical effect when $\mathrm{RMS}(\mathbf{a}) \ll \sqrt{\varepsilon}$, i.e., for near-zero activation vectors. In this regime the epsilon's role is to bound the magnitude of the scaling factor, not to preserve normalization fidelity, so the approximation is benign. Appendix~\ref{app:epsilon} provides the full derivation.
 
@@ -599,19 +615,6 @@ Tokens & PyTorch\,+\,cuBLAS & vLLM\,+\,cuBLAS & FlashNorm & vs PyTorch & vs vLLM
 \hline
 \end{tabular}
 \end{table}
-
-\paragraph{Relationship to quantization.}
-FlashNorm is orthogonal to weight quantization. In fact, folding normalization
-weights into $\mathbf{W}^*$ before quantization can improve quantization quality
-by absorbing per-channel scale factors directly into the weight distribution,
-a technique already used in practice (e.g., SmoothQuant~\citep{smoothQuant}). We leave a systematic
-study of this interaction to future work.
-
-\paragraph{Activation dynamic range.}
-For implementations utilizing low-precision fixed-point activations, FlashNorm’s deferred
-normalization may trigger overflows during matrix multiplication, as noted in \citep{MXNorm}.
-However, the majority of contemporary frameworks employ floating-point activations alongside
-either fixed-point or floating-point weights, which inherently mitigates this risk.
 
 Because the mathematics is exact in both directions, FlashNorm admits two complementary use cases: as a post-hoc transformation applied to existing trained checkpoints (the setting measured in this paper), and as a default normalization-plus-linear building block adopted from scratch in new model architectures. In the latter case the per-channel weight tensor $\mathbf{g}$ is absent from the model by construction, which reduces parameter count and removes the framework-integration work required to serve post-hoc-transformed checkpoints through existing fused kernels.
 
