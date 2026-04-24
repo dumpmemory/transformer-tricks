@@ -231,7 +231,7 @@ def hello_world(repo, max_new_tok=4, arch='AutoModelForCausalLM', perf=False):
   #  transformers.logging.set_verbosity_error()
 
 
-def perplexity(repo, speedup=1, arch='AutoModelForCausalLM', bars=False, perf=False):
+def perplexity(repo, speedup=1, arch='AutoModelForCausalLM', bars=False, perf=False, device='cpu', dtype=None):
   """calculate perplexity of an LLM with wikitext2
   this def is copied from https://huggingface.co/docs/transformers/perplexity
   I made the following changes to adapt it for SmolLM (was GPT2 before):
@@ -248,7 +248,12 @@ def perplexity(repo, speedup=1, arch='AutoModelForCausalLM', bars=False, perf=Fa
   # TODO: consider using instead 'with torch.no_grad():'
 
   tok = AutoTokenizer.from_pretrained(repo)
-  model = eval(f'{arch}.from_pretrained(repo, low_cpu_mem_usage=True)')
+
+  kwargs = {'low_cpu_mem_usage': True}
+  if dtype is not None:
+    kwargs['torch_dtype'] = dtype
+
+  model = eval(f'{arch}.from_pretrained(repo, **kwargs)').to(device)
 
   # tokenize wikitext2
   test = datasets.load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
@@ -265,7 +270,7 @@ def perplexity(repo, speedup=1, arch='AutoModelForCausalLM', bars=False, perf=Fa
   for begin_loc in tqdm(range(0, seq_len, stride), disable=not bars):
     end_loc = min(begin_loc + max_length, seq_len)
     trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
-    input_ids = encodings.input_ids[:, begin_loc:end_loc].to('cpu')
+    input_ids = encodings.input_ids[:, begin_loc:end_loc].to(device)
     target_ids = input_ids.clone()
     target_ids[:, :-trg_len] = -100
     outputs = model(input_ids, labels=target_ids)
@@ -285,6 +290,7 @@ def perplexity(repo, speedup=1, arch='AutoModelForCausalLM', bars=False, perf=Fa
         f'  (time: {time.perf_counter() - start_time:.2f}s)' if perf else '')
   # print('nlls:', nlls)
   del model; gc.collect()  # run garbage collection
+  return ppl.item()
 
 
 #-------------------------------------------------------------------------------------
