@@ -697,7 +697,7 @@ where $\text{RSSe}(\a) = \sqrt{n \epsilon + \sas}$.
 
 \section{RMSNorm Decode-Time Fraction Across Precisions}\label{app:rmsnorm-fraction}
 
-\paragraph{Setup.} \texttt{Llama-3.2-1B-Instruct} loaded in HuggingFace Transformers on a single NVIDIA A100 (40\,GB) at bf16, 8-bit BitsAndBytes, and 4-bit BitsAndBytes (NF4 with double quantization) \citep{bitsandbytes}. For each precision, 20 trials of greedy decode generating 256 tokens after 3 warmup runs. CUDA-event hooks attached to every \texttt{LlamaRMSNorm} module record per-call start/end timestamps; cumulative RMSNorm time per generation is summed across all 33 norm calls per forward pass and reported alongside externally-measured total decode wall-clock.
+\paragraph{Setup.} \texttt{Llama-3.2-1B-Instruct} loaded in HuggingFace Transformers on a single NVIDIA A100 (40\,GB) at bf16, 8-bit BitsAndBytes, and 4-bit BitsAndBytes (NF4 with double quantization) \citep{bitsandbytes}. For each precision, 20 trials of greedy decode generating 256 tokens after 3 warmup runs. CUDA-event hooks attached to every \texttt{LlamaRMSNorm} module record per-call start/end timestamps; cumulative RMSNorm time per generation is summed across all 33 norm calls per forward pass and reported alongside externally-measured total decode wall-clock. Reproducibility notebook in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_decode\_profile.ipynb}}.
 
 \begin{table}[h!] \centering
 \caption{RMSNorm wall-clock fraction during 256-token greedy decode on \texttt{Llama-3.2-1B-Instruct}, A100, fp16 inputs, median of 20 trials. Norm time is cumulative across all per-layer RMSNorm calls.}
