@@ -66,8 +66,9 @@ The same techniques extend to LayerNorm, Dynamic Tanh (DyT), feed-forward networ
 with GLU variants, and RoPE-based attention.
 On an NVIDIA T4 GPU, FlashNorm achieves \textbf{33--35\%}
 lower latency on the norm-then-project operation in the compute-bound (prefill)
-regime at SmolLM2-135M scale, and \textbf{12--14\%} at Llama-7B scale. We verify
-zero-loss weight folding on three models.
+regime at SmolLM2-135M scale, and \textbf{12--14\%} at Llama-7B scale.
+At decode on Llama-3.2-1B in stock HuggingFace Transformers (NVIDIA A100, bf16), routing through PyTorch's existing weightless C++ kernel yields \textbf{$+12.77\%$} end-to-end (Appendix~\ref{app:rmsnorm-fraction}).
+We verify zero-loss weight folding on three models.
 Beyond inference speed, FlashNorm simplifies model implementations by
 reducing parameter tensor count.
 Watch our explainer video \citep{flashNorm-video} and see
