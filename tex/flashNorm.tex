@@ -55,19 +55,20 @@ RMSNorm followed by a linear layer that (i) eliminates the normalization weights
 by folding them into the subsequent linear layer, and (ii) defers the scalar
 RMS normalization to the output of the matrix multiplication, enabling the two
 operations to execute in parallel.
+The same techniques extend to LayerNorm and  Dynamic Tanh (DyT).
 % FlashNorm is mathematically identical to the original computation---it introduces
 % no approximation and requires no retraining.
-Additionally, by the scale invariance of RMS,
-an RMSNorm followed by a linear layer followed by another RMSNorm allows the first
-RMSNorm to be eliminated entirely---a mathematically identical simplification that removes the
-pre-attention RMSNorm in models using QKV-normalization (e.g., Gemma~4) and in MLA-models
-with latent normalization (e.g., DeepSeek-V2, Mistral Small 4,  and OpenMythos).
-The same techniques extend to LayerNorm, Dynamic Tanh (DyT), feed-forward networks
-with GLU variants, and RoPE-based attention.
+And due to RMS scale invariance, a linear layer between two RMSNorms makes the
+%first one redundant---a mathematically identical simplification that removes the
+first one redundant, removing the pre-attention RMSNorm in QKV-normalized models
+(e.g., Gemma~4) and in MLA-models
+with latent normalization (e.g., DeepSeek-V2, Mistral Small 4).
 On an NVIDIA T4 GPU, FlashNorm achieves \textbf{33--35\%}
 lower latency on the norm-then-project operation in the compute-bound (prefill)
 regime at SmolLM2-135M scale, and \textbf{12--14\%} at Llama-7B scale.
-On an NVIDIA A100 at bf16, FlashNorm achieves a \textbf{$+12.77\%$} end-to-end speedup at decode on Llama-3.2-1B in stock HuggingFace Transformers, via PyTorch's existing weightless C++ kernel (Appendix~\ref{app:rmsnorm-fraction}).
+On an NVIDIA A100, FlashNorm achieves a \textbf{13\%} end-to-end speedup
+at decode on Llama-3.2-1B in HuggingFace Transformers.
+% via PyTorch's existing weightless C++ kernel (Appendix~\ref{app:rmsnorm-fraction}).
 We verify zero-loss weight folding on three models.
 Beyond inference speed, FlashNorm simplifies model implementations by
 reducing parameter tensor count.
@@ -547,7 +548,7 @@ a technique already used in practice (e.g., SmoothQuant~\citep{smoothQuant}). We
 study of this interaction to future work.
 
 \paragraph{Activation dynamic range.}
-For implementations utilizing low-precision fixed-point activations, FlashNorm’s deferred
+For implementations utilizing low-precision fixed-point activations, FlashNorm's deferred
 normalization may trigger overflows during matrix multiplication, as noted in \citep{MXNorm}.
 However, the majority of contemporary frameworks employ floating-point activations alongside
 either fixed-point or floating-point weights, which inherently mitigates this risk.
