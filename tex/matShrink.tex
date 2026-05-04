@@ -2,9 +2,9 @@
 
 \documentclass{article}
 
-\usepackage[preprint, nonatbib]{neurips_2025}
-%\usepackage[nonatbib]{neurips_2025}         % for submission
-%\usepackage[final, nonatbib]{neurips_2025}  % final version
+\usepackage[preprint, nonatbib]{neurips_2026}
+%\usepackage[nonatbib]{neurips_2026}         % for submission
+%\usepackage[final, nonatbib]{neurips_2026}  % final version
 \usepackage{neurips_2025_mods}  % my mods for neurips_2025.sty
 
 % shortcuts
@@ -13,18 +13,23 @@
 \newcommand{\mc}[2]{\multicolumn{#1}{c}{#2}}        % table multicolumn
 \def\fline{\Xhline{2\arrayrulewidth}}               % fat-line for table
 
-\title{MatShrink: Lossless weight compression for transformers}
+\title{MatShrink: Lossless Weight Compression for Back-to-Back Linear Layers in Transformers}
 %\title{MatShrink: Lossless weight compression for back-to-back linear layers in transformers}
+%\title{MatShrink: Lossless weight compression for transformers}
 %\title{MatShrink: Lossless compression for back-to-back weight matrices}
 %\title{[Work-in-progress]: Matrix-shrink for transformers without loss of accuracy}
 
-\author{Nils Graef\thanks{\texttt{info@openmachine.ai}}, \, Siddharth Mohan \\
+\author{Nils Graef\thanks{\texttt{info@openmachine.ai}}, \, Filip Makraduli, \, Siddh Shah, \, Siddharth Mohan \\
   \href{https://openmachine.ai}{OpenMachine}}
 
 \begin{document} \maketitle
 
 \begin{abstract}
-MatShrink reduces the number of weights for back-to-back matrices in general, and for transformer models in particular. Unlike standard weight compression and pruning techniques, MatShrink uses matrix inversion to eliminate weights in a mathematically equivalent way and thus without compromising model accuracy. MatShrink is applicable to both inference and training: Existing models can be retrofitted with MatShrink in a mathematically equivalent way, and future models can use MatShrink for both training and inference. We also propose a simplified MLA (multi-head latent attention) scheme. See \citep{tricks} for code and more transformer tricks.
+We present MatShrink, a mathematically \emph{exact} method for reducing the parameter count of any pair of consecutive linear layers. Unlike approximate compression techniques such as SVD-based rank reduction or magnitude pruning, MatShrink eliminates an $r \times r$ block of weights via an invertible change of basis on the shared inner dimension $r$, incurring zero accuracy loss by construction. We state and prove the core identity as a formal proposition and establish conditions under which the transformation is numerically stable. We specialize MatShrink to the V-O, Q-K, and latent projections of multi-head attention (MHA), multi-head latent attention (MLA), grouped-query attention (GQA), and multi-query attention (MQA), yielding lossless savings of 8--17\% of per-layer attention parameters across representative models. We identify a bf16 numerical instability caused by ill-conditioned transformation matrices and prove that pivoted QR basis selection minimizes the worst-case condition number among all column-permutation strategies.
+Empirical validation on four models (GPT-2-124M, SmolLM2-135M, Gemma-3-1B, Gemma-3-4B) confirms exact fp32 equivalence and near-exact bf16 equivalence, with checkpoints loading directly in HuggingFace Transformers and vLLM without any runtime modification.
+MatShrink is applicable to both inference and training: Existing models can be retrofitted with MatShrink in a mathematically equivalent way, and future models can use MatShrink for both training and inference.
+We additionally propose a simplified MLA architecture that eliminates the separate RoPE projection cache, reducing both parameter count and long-sequence KV-cache overhead.
+See \citep{tricks} for code and more transformer tricks.
 \end{abstract}
 
 For two back-to-back weight matrices $W_A$ and $W_B$, Fig. \ref{fig1} illustrates how MatShrink reduces the size of $W_B$ in a mathematically equivalent way by using matrix inversion.
