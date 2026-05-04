@@ -530,7 +530,7 @@ Tokens & Sequential & FlashNorm & Speedup & Path \\
 
 FlashNorm uses adaptive dispatch: the parallel path is used only when the GEMM is compute-bound (token count exceeds a hardware-dependent threshold). For memory-bound workloads such as autoregressive decoding, FlashNorm falls back to sequential execution (0\% overhead). This is because managing parallel CUDA streams introduces scheduling overhead that exceeds the time saved when the GEMM is small. At autoregressive decode on \texttt{Llama-3.2-1B-Instruct} in HuggingFace Transformers, RMSNorm operations occupy 24.6\% of total wall-clock at bf16, an order of magnitude above their FLOP share; the cumulative norm cost is invariant under weight quantization, so the relative impact of FlashNorm grows in deployments that aggressively quantize linears (Appendix~\ref{app:rmsnorm-fraction}).
 
-\section{Discussion}
+\section{Limitations and Discussion}
 
 %\paragraph{TODO: PERHAPS REMOVE THIS: When to use FlashNorm.}
 %FlashNorm provides the largest benefit in prefill-dominated workloads with long
