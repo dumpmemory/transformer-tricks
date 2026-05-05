@@ -16,22 +16,23 @@
 % shortcuts
 \newcommand{\mat}[1]{\mathbf{#1}}     % shortcut for matrix
 \newcommand{\RMS}[1]{\text{RMS}(#1)}  % shortcut for RMS(x)
-\def\rms{\text{RMS}(\vec{a})}         % RMS(a)
+% Vector macros standardized to \mathbf to match main-text convention.
+\def\rms{\text{RMS}(\mathbf{a})}      % RMS(a)
 \def\f1n{\frac{1}{n}}                 % 1/n
 \def\sas{\sum_{i=1}^n a_i^2}           % sum over a_i squared
 \def\W*{\mat{W}^\ast}                 % matrix W*
 \def\V*{\mat{V}^\ast}                 % matrix V*
 \def\mW{\mat{W}}                      % matrix W
 \def\mV{\mat{V}}                      % matrix V
-\def\a{\vec{a}}                       % vector a
-\def\b{\vec{b}}                       % vector b
-\def\c{\vec{c}}                       % vector c
-\def\vb{\vec{\beta}}                  % vector beta
-\def\vx{\vec{x}}                      % vector x
-\def\vy{\vec{y}}                      % vector y
-\def\vz{\vec{z}}                      % vector z
-\def\vg{\vec{g}}                      % vector g
-\def\vs{\vec{s}}                      % vector s
+\def\a{\mathbf{a}}                    % vector a
+\def\b{\mathbf{b}}                    % vector b
+\def\c{\mathbf{c}}                    % vector c
+\def\vb{\boldsymbol{\beta}}           % vector beta
+\def\vx{\mathbf{x}}                   % vector x
+\def\vy{\mathbf{y}}                   % vector y
+\def\vz{\mathbf{z}}                   % vector z
+\def\vg{\mathbf{g}}                   % vector g
+\def\vs{\mathbf{s}}                   % vector s
 \def\cosi{\cos{(\cdot)}}              % cos(.)
 \def\sini{\sin{(\cdot)}}              % sin(.)
 
@@ -695,6 +696,7 @@ using the reciprocal of the \emph{squared} RMS, which is the Mean Square $\mathr
   = \frac{1}{\mathrm{MS}(\mathbf{a})}
   = \frac{n}{\sum_{i=1}^n a_i^2}.
 \]
+For implementations that use the $\varepsilon$-regularized form, the consolidated factor is $1/(\varepsilon + \mathrm{MS}(\mathbf{a})) = n/(n\varepsilon + \sum_{i=1}^n a_i^2)$, which reduces to the unregularized expression as $\varepsilon \to 0$ and is the form to use in production.
 \begin{figure}[h!] \centering
   \includegraphics[scale=0.8]{../doc/fig/flashNorm_fig4.pdf}
   \caption{FFN with ReGLU (or bilinear GLU) and preceding FlashNorm: (a) unoptimized version;
@@ -702,9 +704,9 @@ using the reciprocal of the \emph{squared} RMS, which is the Mean Square $\mathr
 \label{fig4} \end{figure}
 
 \section{RMS with epsilon}\label{app:epsilon}
-Many implementations add a small epsilon $\epsilon$ to the RMS value to limit the resulting scaling factor $1/\mathrm{RMS}(\mathbf{a})$ and to avoid division by zero as follows:
+Many implementations add a small epsilon $\varepsilon$ to the RMS value to limit the resulting scaling factor $1/\mathrm{RMS}(\mathbf{a})$ and to avoid division by zero as follows:
 \begin{equation*}
- \text{RMSe}(\a) = \sqrt{\epsilon + \f1n \sas} = \sqrt{\epsilon + \left( \rms \right)^2}
+ \text{RMSe}(\a) = \sqrt{\varepsilon + \f1n \sas} = \sqrt{\varepsilon + \left( \rms \right)^2}
 \end{equation*}
 
 $\text{RMSe}(\a)$ can be used as a drop-in-replacement for RMS. The popular HuggingFace transformer library calls this epsilon \verb+rms_norm_eps+, which is set to $10^{-5}$ for Llama3.
@@ -733,12 +735,12 @@ where $\text{RSS}(\a) = \sqrt{\sas}$ is the Root Sum Square. We can now merge th
 \end{equation*}
 with new normalization weights $g_i^\ast = \sqrt{n} \cdot g_i$ . These new normalization weights can now be merged with the weights $\mat{W}$ of the following linear layer as shown in the previous sections. This optimization also applies for the case where we add an epsilon as detailed in the previous section. In this case, we factor out $1/n$ as follows:
 \begin{equation*}
-  \text{RMSe}(\a) = \sqrt{\epsilon + \f1n \sas}
-  = \sqrt{\f1n \left( n \epsilon + \sas \right)}
-  %= \sqrt{\f1n} \sqrt{n \epsilon + \sas}
+  \text{RMSe}(\a) = \sqrt{\varepsilon + \f1n \sas}
+  = \sqrt{\f1n \left( n \varepsilon + \sas \right)}
+  %= \sqrt{\f1n} \sqrt{n \varepsilon + \sas}
   = \sqrt{\f1n} \cdot \text{RSSe}(\a)
 \end{equation*}
-where $\text{RSSe}(\a) = \sqrt{n \epsilon + \sas}$.
+where $\text{RSSe}(\a) = \sqrt{n \varepsilon + \sas}$.
 
 \section{RMSNorm Decode-Time Fraction Across Precisions}\label{app:rmsnorm-fraction}
 
@@ -890,7 +892,7 @@ All 18 shapes deliver positive speedup versus the HuggingFace path ($+$28\% to $
 
 \textit{(i) Shape-specialized tile dispatch.} Multiple \texttt{CollectiveBuilder} instantiations with different \texttt{TileShape} variants (e.g.\ $\langle 16, 128, 64 \rangle$ for decode, $\langle 128, 128, 64 \rangle$ for transitional, $\langle 256, 128, 64 \rangle$ for compute-bound prefill), dispatched by $(M, K, N)$ at runtime. This is the same pattern as the Triton prototype's two-condition dispatch (Section~\ref{app:a100}) and as cuBLAS's own internal heuristic. Engineering effort, approximately one week for a CUTLASS-familiar engineer.
 
-\textit{(ii) Custom \texttt{CollectiveMainloop} with in-line RMS accumulation.} Fuse $\sum_k x^2_{m,k}$ into the matmul's producer warpgroup during the existing tile-load phase, removing the pre-pass kernel entirely. The mainloop reads $x$ from HBM regardless; accumulating $x^2$ costs register operations, not additional memory traffic. CUTLASS 3.x supports this via template extension of \texttt{CollectiveMmaFma}; a 400-line reference design accompanies the prototype notebook. Engineering effort, approximately two to four weeks.
+\textit{(ii) Custom \texttt{CollectiveMainloop} with in-line RMS accumulation.} Fuse $\sum_k x^2_{m,k}$ into the matmul's producer warpgroup during the existing tile-load phase, removing the pre-pass kernel entirely. In data-parallel GEMM configurations (where each thread block sees the full reduction axis) the mainloop reads $x$ from HBM regardless and accumulating $x^2$ costs register operations, not additional memory traffic. In Split-K configurations used for memory-bound decode, no individual thread block sees the full reduction axis, so a global RMS scalar requires a partial-reduction stage with inter-block synchronization before the epilogue can scale; this introduces a small additional traffic cost that should be accounted for in the design. CUTLASS 3.x supports both patterns via template extension of \texttt{CollectiveMmaFma}; a 400-line reference design accompanies the prototype notebook. Engineering effort, approximately two to four weeks.
 
 With these two additions in place, the kernel would extend the measured small-scale wins of Table~\ref{tab:h100-full} to Llama-family production scales. Both additions sit within vLLM's~\citep{vLLM} existing CUTLASS infrastructure, which routinely maintains shape-specific tile dispatch for its matmul fast paths. This is the engineering scope the paper positions as the natural next step for production integration.
 
