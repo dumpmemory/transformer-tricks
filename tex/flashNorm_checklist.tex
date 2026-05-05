@@ -5,7 +5,7 @@
 \item {\bf Claims}
     \item[] Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: The abstract and introduction state the two algebraic propositions, the preservation of model outputs, the three-model verification scope (SmolLM2-135M, Llama-3.2-1B, Llama-3.1-8B), and the T4 / A100 / H100 empirical scope. The reported speedups (33-35\% T4 at SmolLM2 scale, 12-14\% T4 at Llama-7B scale, 13\% realized HF end-to-end on Llama-3.2-1B at bf16) match the experiments in Section 5 and Appendix app:rmsnorm-fraction.
+    \item[] Justification: The abstract and introduction state the two algebraic propositions, the preservation of model outputs, the three-model verification scope (SmolLM2-135M, Llama-3.2-1B, Llama-3.1-8B), and the T4 / A100 / H100 empirical scope. The reported speedups (33-35\% T4 at SmolLM2 scale, 12-14\% T4 at Llama-7B scale, 13\% realized HF end-to-end on Llama-3.2-1B at bf16) match the experiments in Section~\ref{sec:experiments} and Appendix~\ref{app:rmsnorm-fraction}.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the abstract and introduction do not include the claims made in the paper.
@@ -17,7 +17,7 @@
 \item {\bf Limitations}
     \item[] Question: Does the paper discuss the limitations of the work performed by the authors?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: Section 6 (Discussion and Limitations) addresses the RMSNorm-only scope, activation dynamic range under fixed-point backends, adaptive-dispatch fallback at small token counts, the prototype-kernel scope of the A100/H100 implementations, and the absence of direct measurements on native low-bit hardware.
+    \item[] Justification: Section~\ref{sec:limitations-discussion} (Limitations and Discussion) addresses the RMSNorm-only scope, activation dynamic range under fixed-point and FP8 backends, adaptive-dispatch fallback at small token counts, the prototype-kernel scope of the A100/H100 implementations, the numerical sensitivity at larger model scales under lossy inference precisions, and the absence of direct measurements on native low-bit hardware.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper has no limitation while the answer \answerNo{} means that the paper has limitations, but those are not discussed in the paper.
@@ -82,7 +82,7 @@
 \item {\bf Experimental setting/details}
     \item[] Question: Does the paper specify all the training and test details (e.g., data splits, hyperparameters, how they were chosen, type of optimizer) necessary to understand the results?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: Each experiment specifies hardware (T4 / A100 40GB / H100), precision (bf16 / fp16 / 8-bit BitsAndBytes / NF4+DQ), token-count protocol, number of trials (n=20), and aggregation (median). BitsAndBytes 8-bit and 4-bit hyperparameters are listed in Appendix app:rmsnorm-fraction.
+    \item[] Justification: Each experiment specifies hardware (T4 / A100 40GB / H100), precision (bf16 / fp16 / 8-bit BitsAndBytes / NF4+DQ), token-count protocol, number of trials (n=20), and aggregation (median). BitsAndBytes 8-bit and 4-bit hyperparameters are listed in Appendix~\ref{app:rmsnorm-fraction}.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -110,7 +110,7 @@
 \item {\bf Experiments compute resources}
     \item[] Question: For each experiment, does the paper provide sufficient information on the computer resources (type of compute workers, memory, time of execution) needed to reproduce the experiments?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: T4 (Section 5.2), Colab A100 40GB (Appendices app:rmsnorm-fraction and app:a100), and H100 (Appendix app:h100-cutlass). Per-experiment runtime is short (each notebook runs in under thirty minutes); total reported compute is well under one GPU-day. Exploratory and failed runs were a small multiple of the reported compute.
+    \item[] Justification: T4 (Section~\ref{sec:experiments}), Colab A100 40GB (Appendices~\ref{app:rmsnorm-fraction} and~\ref{app:a100}), and H100 (Appendix~\ref{app:h100-cutlass}). Per-experiment runtime is short (each notebook runs in under thirty minutes); total reported compute is well under one GPU-day. Exploratory and failed runs were a small multiple of the reported compute.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
