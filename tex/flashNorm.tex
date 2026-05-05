@@ -182,8 +182,8 @@ several forms. Batch normalization folding into convolutional weights is standar
 practice in quantization-aware training and model deployment~\citep{quantJacob, convBN}
 and \verb+torch.compile+ can perform it automatically~\citep{torchCompileFuse}.
 OLMo~1 models use weightless LayerNorm, which they call
-\emph{non-parametric}~\citep{olmo2}; \citet{remove-norm2} show that LayerNorm
-can be removed post-hoc from GPT-2 XL with a learned ablation. FlashNorm differs in being a closed-form algebraic restatement (exact in real arithmetic and bit-identical at runtime precision) that requires no retraining or empirical recovery, and additionally exposes a parallel-execution opportunity (Proposition~\ref{prop:commute}); Appendix~\ref{app:additional-notes} provides an extended comparison.
+\emph{non-parametric}~\citep{olmo2}. FlashNorm applies analogous reasoning to
+normalization weights of RMSNorm and LayerNorm; see Appendix~\ref{app:additional-notes} for an extended comparison to \citet{remove-norm2} and the OLMo line.
 
 \paragraph{FlashAttention.}
 FlashAttention~\citep{flash-attention} is the closest conceptual predecessor:
@@ -203,7 +203,7 @@ Let $\mathbf{a} \in \mathbb{R}^n$ be an activation vector. RMSNorm computes
   \qquad
   \mathrm{RMS}(\mathbf{a}) = \sqrt{\frac{1}{n}\sum_{i=1}^n a_i^2},
 \]
-where $\mathbf{g} \in \mathbb{R}^n$ are learned normalization weights.\footnote{Production implementations include a small regularizer $\varepsilon$ inside the square root to prevent division by zero; we use the unregularized form for the proofs of Propositions~\ref{prop:weightless} and~\ref{prop:commute} and treat the $\varepsilon$-regularized case in Section~\ref{sec:rms-cancel} and Appendix~\ref{app:epsilon}.}
+where $\mathbf{g} \in \mathbb{R}^n$ are learned normalization weights.
 In transformer models, RMSNorm is followed by a linear layer $\mathbf{W} \in \mathbb{R}^{n \times k}$  as illustrated in Fig. \ref{fig1}(a):
 \[
   \mathbf{z} = \mathrm{RMSNorm}(\mathbf{a})\, \mathbf{W}.
@@ -263,10 +263,6 @@ $(\mathbf{a}\mathbf{W}^* + \mathbf{c}) / \mathrm{RMS}(\mathbf{a}) \neq
 In this case, Proposition~\ref{prop:weightless} (weightless normalization) still
 applies, but the normalization must precede the bias addition.
 % TODO(nils): clarify that in this case we can still compute RMS and matmul in parallel!
-\end{remark}
-
-\begin{remark}[Numerical precision]
-Deferring the scalar to after the matrix multiplication enlarges the dynamic range of the intermediate $\mathbf{a}\mathbf{W}^*$; implementations accumulate it in a higher precision (typically FP32 behind FP16/BF16 storage). See Section~\ref{sec:limitations-discussion} and Appendix~\ref{app:additional-notes}.
 \end{remark}
 
 \begin{remark}[Unfolded case]
@@ -566,23 +562,20 @@ FlashNorm uses adaptive dispatch: the parallel path is used only when the GEMM i
 FlashNorm is orthogonal to weight quantization. In fact, folding normalization
 weights into $\mathbf{W}^*$ before quantization can improve quantization quality
 by absorbing per-channel scale factors directly into the weight distribution,
-a technique already used in practice (e.g., SmoothQuant~\citep{smoothQuant}). Appendix~\ref{app:additional-notes} contains a per-row analysis of how the fold affects weight dynamic range and the choice of per-channel vs per-tensor quantization. We leave a systematic empirical study of this interaction to future work.
+a technique already used in practice (e.g., SmoothQuant~\citep{smoothQuant}). We leave a systematic
+study of this interaction to future work.
 
 \paragraph{Activation dynamic range.}
 For implementations utilizing low-precision fixed-point activations, FlashNorm's deferred
 normalization may trigger overflows during matrix multiplication, as noted in \citep{MXNorm}.
-The majority of contemporary frameworks employ floating-point activations alongside
-either fixed-point or floating-point weights, and at FP16/BF16 our production kernels
-accumulate the unnormalized matmul output in FP32, which mitigates this risk in practice. Low-precision floating-point formats (notably FP8) require additional care; see Appendix~\ref{app:additional-notes} for the FP8 E4M3 caveat.
+However, the majority of contemporary frameworks employ floating-point activations alongside
+either fixed-point or floating-point weights, which inherently mitigates this risk.
 
 %\paragraph{TODO: Epsilon and numerical precision.}
 %The $\varepsilon$-RMS variant $\mathrm{RMS}_\varepsilon(\mathbf{a}) = \sqrt{\varepsilon + \frac{1}{n}\sum a_i^2}$ breaks exact scale-invariance: $\mathrm{RMS}_\varepsilon(s \cdot \mathbf{a}) \neq s \cdot \mathrm{RMS}_\varepsilon(\mathbf{a})$. However, $\varepsilon$ only has practical effect when $\mathrm{RMS}(\mathbf{a}) \ll \sqrt{\varepsilon}$, i.e., for near-zero activation vectors. In this regime the epsilon's role is to bound the magnitude of the scaling factor, not to preserve normalization fidelity, so the approximation is benign. Appendix~\ref{app:epsilon} provides the full derivation.
 
 %\paragraph{Two sources of speedup.}
 %FlashNorm's speedup decomposes into two mathematically independent sources. Weight-fold savings (Proposition~\ref{prop:weightless}) eliminate the per-channel multiply by $\mathbf{g}$ inside the RMSNorm kernel; this source is universal and architecture-agnostic, but modest in absolute magnitude. Kernel-fusion savings eliminate one kernel launch, one intermediate activation allocation, and an HBM round-trip on the normalized activations, yielding a fixed per-call reduction of approximately 15 to 25\,$\mu$s on modern GPUs that is independent of model scale. The T4 results of Section~\ref{sec:experiments} isolate the fusion source via adaptive CUDA streaming; the A100 prototype of Section~\ref{sec:a100-fused} realizes both sources inside a single kernel. Appendix~\ref{app:a100} provides a quantitative decomposition and analyzes when each source is observable as a net speedup in the presence of the vendor's tuned matmul kernels.
-
-\paragraph{Numerical sensitivity at larger scales.}
-Under lossy inference precisions, post-hoc weight folding can produce one-token argmax divergences at tight decision points; the effect is visible at Llama-7B scale and is not specific to FlashNorm. See Appendix~\ref{app:additional-notes}.
 
 \paragraph{Simplification as a primary benefit.}
 Beyond raw speed, FlashNorm simplifies model implementations in a manner analogous
