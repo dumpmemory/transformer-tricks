@@ -182,17 +182,8 @@ several forms. Batch normalization folding into convolutional weights is standar
 practice in quantization-aware training and model deployment~\citep{quantJacob, convBN}
 and \verb+torch.compile+ can perform it automatically~\citep{torchCompileFuse}.
 OLMo~1 models use weightless LayerNorm, which they call
-\emph{non-parametric}~\citep{olmo2}. \citet{remove-norm2} likewise show that LayerNorm
-can be removed post-hoc from GPT-2 XL with a learned ablation procedure that recovers
-quality on language-modeling and downstream tasks. The two settings are complementary
-to ours: OLMo's non-parametric form is a training-time architectural choice, and the
-post-hoc removal in \citet{remove-norm2} is an empirically tuned procedure that may
-introduce small quality deltas. FlashNorm contributes a closed-form algebraic
-restatement that is exact under real arithmetic and bit-identical when the fold is
-performed at the runtime precision, applies to any pretrained RMSNorm checkpoint
-without retraining or empirical recovery, and additionally exposes a parallel-execution
-opportunity (Proposition~\ref{prop:commute}) that the prior weightless / removal lines
-do not address.
+\emph{non-parametric}~\citep{olmo2}; \citet{remove-norm2} show that LayerNorm
+can be removed post-hoc from GPT-2 XL with a learned ablation. FlashNorm differs in being a closed-form algebraic restatement (exact in real arithmetic and bit-identical at runtime precision) that requires no retraining or empirical recovery, and additionally exposes a parallel-execution opportunity (Proposition~\ref{prop:commute}); Appendix~\ref{app:additional-notes} provides an extended comparison.
 
 \paragraph{FlashAttention.}
 FlashAttention~\citep{flash-attention} is the closest conceptual predecessor:
@@ -212,7 +203,7 @@ Let $\mathbf{a} \in \mathbb{R}^n$ be an activation vector. RMSNorm computes
   \qquad
   \mathrm{RMS}(\mathbf{a}) = \sqrt{\frac{1}{n}\sum_{i=1}^n a_i^2},
 \]
-where $\mathbf{g} \in \mathbb{R}^n$ are learned normalization weights. Production implementations include a small regularizer inside the square root, $\mathrm{RMS}_\varepsilon(\mathbf{a}) = \sqrt{\varepsilon + \tfrac{1}{n}\sum_i a_i^2}$, to prevent division by zero; we use the unregularized form for the proofs of Propositions~\ref{prop:weightless} and~\ref{prop:commute}, and address the $\varepsilon$-regularized case in Section~\ref{sec:rms-cancel} and Appendix~\ref{app:epsilon}.
+where $\mathbf{g} \in \mathbb{R}^n$ are learned normalization weights.\footnote{Production implementations include a small regularizer $\varepsilon$ inside the square root to prevent division by zero; we use the unregularized form for the proofs of Propositions~\ref{prop:weightless} and~\ref{prop:commute} and treat the $\varepsilon$-regularized case in Section~\ref{sec:rms-cancel} and Appendix~\ref{app:epsilon}.}
 In transformer models, RMSNorm is followed by a linear layer $\mathbf{W} \in \mathbb{R}^{n \times k}$  as illustrated in Fig. \ref{fig1}(a):
 \[
   \mathbf{z} = \mathrm{RMSNorm}(\mathbf{a})\, \mathbf{W}.
@@ -275,7 +266,7 @@ applies, but the normalization must precede the bias addition.
 \end{remark}
 
 \begin{remark}[Numerical precision]
-Deferring the scalar $1/\mathrm{RMS}(\mathbf{a})$ to after the matrix multiplication alters the dynamic range of the intermediate values: $\mathbf{a}\mathbf{W}^*$ can be substantially larger than $(\mathbf{a}/\mathrm{RMS}(\mathbf{a}))\mathbf{W}^*$ for outlier-prone activations. Implementations therefore accumulate this intermediate in a higher precision than the storage format (typically FP32 accumulators behind FP16/BF16 storage); see Section~\ref{sec:limitations-discussion} for the dynamic-range discussion and the FP8 caveat.
+Deferring the scalar to after the matrix multiplication enlarges the dynamic range of the intermediate $\mathbf{a}\mathbf{W}^*$; implementations accumulate it in a higher precision (typically FP32 behind FP16/BF16 storage). See Section~\ref{sec:limitations-discussion} and Appendix~\ref{app:additional-notes}.
 \end{remark}
 
 \begin{remark}[Unfolded case]
@@ -575,20 +566,14 @@ FlashNorm uses adaptive dispatch: the parallel path is used only when the GEMM i
 FlashNorm is orthogonal to weight quantization. In fact, folding normalization
 weights into $\mathbf{W}^*$ before quantization can improve quantization quality
 by absorbing per-channel scale factors directly into the weight distribution,
-a technique already used in practice (e.g., SmoothQuant~\citep{smoothQuant}). The fold $\mathbf{W}^*_{i,j} = g_i \cdot \mathbf{W}_{i,j}$ scales each row of $\mathbf{W}$ by the corresponding $g_i$: when $\mathbf{g}$ has small variation across channels, $\mathbf{W}^*$ has similar dynamic range to $\mathbf{W}$ and existing per-channel quantization recipes carry over unchanged; when $\mathbf{g}$ has wide variation, $\mathbf{W}^*$ has rows of disparate magnitudes, making per-channel rather than per-tensor quantization the natural target. The composition is in the same family as SmoothQuant's per-channel-scale absorption, with the practical difference that FlashNorm's $\mathbf{g}$ is the existing trained RMSNorm weight rather than an introduced calibration scale. We leave a systematic empirical study of this interaction (perplexity, MMLU, HellaSwag, and bits-per-weight across int8, int4, and NF4 with the fold applied before vs.\ after quantization) to future work.
+a technique already used in practice (e.g., SmoothQuant~\citep{smoothQuant}). Appendix~\ref{app:additional-notes} contains a per-row analysis of how the fold affects weight dynamic range and the choice of per-channel vs per-tensor quantization. We leave a systematic empirical study of this interaction to future work.
 
 \paragraph{Activation dynamic range.}
 For implementations utilizing low-precision fixed-point activations, FlashNorm's deferred
 normalization may trigger overflows during matrix multiplication, as noted in \citep{MXNorm}.
 The majority of contemporary frameworks employ floating-point activations alongside
 either fixed-point or floating-point weights, and at FP16/BF16 our production kernels
-accumulate the unnormalized matmul output in FP32, which mitigates this risk in practice.
-Low-precision floating-point formats remain a separate concern: FP8 in the E4M3 layout has
-a maximum representable value of approximately 448, so for outlier-prone activations the
-unnormalized intermediate $\mathbf{a}\mathbf{W}^\ast$ can exceed the FP8 range even when the
-normalized form would not. FP8 deployments therefore require either a higher-precision
-accumulator or per-channel scaling of $\mathbf{W}^\ast$; we leave a systematic FP8 study
-to future work.
+accumulate the unnormalized matmul output in FP32, which mitigates this risk in practice. Low-precision floating-point formats (notably FP8) require additional care; see Appendix~\ref{app:additional-notes} for the FP8 E4M3 caveat.
 
 %\paragraph{TODO: Epsilon and numerical precision.}
 %The $\varepsilon$-RMS variant $\mathrm{RMS}_\varepsilon(\mathbf{a}) = \sqrt{\varepsilon + \frac{1}{n}\sum a_i^2}$ breaks exact scale-invariance: $\mathrm{RMS}_\varepsilon(s \cdot \mathbf{a}) \neq s \cdot \mathrm{RMS}_\varepsilon(\mathbf{a})$. However, $\varepsilon$ only has practical effect when $\mathrm{RMS}(\mathbf{a}) \ll \sqrt{\varepsilon}$, i.e., for near-zero activation vectors. In this regime the epsilon's role is to bound the magnitude of the scaling factor, not to preserve normalization fidelity, so the approximation is benign. Appendix~\ref{app:epsilon} provides the full derivation.
@@ -597,17 +582,7 @@ to future work.
 %FlashNorm's speedup decomposes into two mathematically independent sources. Weight-fold savings (Proposition~\ref{prop:weightless}) eliminate the per-channel multiply by $\mathbf{g}$ inside the RMSNorm kernel; this source is universal and architecture-agnostic, but modest in absolute magnitude. Kernel-fusion savings eliminate one kernel launch, one intermediate activation allocation, and an HBM round-trip on the normalized activations, yielding a fixed per-call reduction of approximately 15 to 25\,$\mu$s on modern GPUs that is independent of model scale. The T4 results of Section~\ref{sec:experiments} isolate the fusion source via adaptive CUDA streaming; the A100 prototype of Section~\ref{sec:a100-fused} realizes both sources inside a single kernel. Appendix~\ref{app:a100} provides a quantitative decomposition and analyzes when each source is observable as a net speedup in the presence of the vendor's tuned matmul kernels.
 
 \paragraph{Numerical sensitivity at larger scales.}
-Under fp32 inference, post-hoc weight folding produces strictly identical greedy
-generation across all three model scales. Under lossy inference precisions
-(fp16/bf16 in HuggingFace Transformers at Llama-7B scale, or vLLM's
-PagedAttention at any precision), precomputed merged weights can produce a
-one-token argmax divergence at tight decision points, which downstream greedy
-decoding then amplifies; the effect is more visible at larger model scales
-where argmax decisions are tighter. This is a general consequence of
-precomputing weight-folded tensors for lossy-inference kernels and is not
-specific to FlashNorm. A native fused $\mathrm{RMSNorm}+\mathrm{QKV}$ kernel
-that defers $\mathbf{g}$ to runtime, rather than precomputing it into
-$\mathbf{W}^\ast$, eliminates the framework dependency. See Appendix~\ref{app:additional-notes} for further detail.
+Under lossy inference precisions, post-hoc weight folding can produce one-token argmax divergences at tight decision points; the effect is visible at Llama-7B scale and is not specific to FlashNorm. See Appendix~\ref{app:additional-notes}.
 
 \paragraph{Simplification as a primary benefit.}
 Beyond raw speed, FlashNorm simplifies model implementations in a manner analogous
@@ -649,6 +624,12 @@ We would like to thank Dmitry Belenko for helpful feedback on this work.
 \paragraph{Scope.} The mathematics of FlashNorm (Propositions~\ref{prop:weightless} and~\ref{prop:commute}) is exact in both directions. Applying FlashNorm post-hoc to a trained model is lossless: the folded model's outputs are identical to the source under fp32 and within benchmark noise under fp16. Training a new model directly with a FlashNorm-shaped normalization-plus-linear block is equally valid: the FlashNorm parameterization (no explicit $\mathbf{g}$, RMS scalar applied after the matmul) represents the same function class as standard RMSNorm followed by a linear layer, so any function reachable under the standard parameterization is reachable under the FlashNorm parameterization. Experiments in this paper cover the post-hoc application; training-from-scratch studies are left to future work.
 
 The FlashNorm transformation is mathematically exact (Propositions~\ref{prop:weightless} and~\ref{prop:commute}), and under fp32 inference produces identical greedy generation across all three model scales. Under lossy inference precisions (fp16/bf16 in HuggingFace Transformers at larger scales, or vLLM's PagedAttention at any precision), precomputed merged weights can produce a one-token argmax divergence at tight decision points, which downstream greedy decoding then amplifies. The effect is more visible at larger model scales where argmax decisions are tighter. This is a general consequence of precomputing weight-folded tensors for lossy-inference kernels and is not specific to FlashNorm. A native fused \texttt{RMSNorm+QKV} kernel that defers $\mathbf{g}$ to runtime, rather than precomputing it into $\mathbf{W^\ast}$, eliminates the framework dependency and is the primary direction for ongoing work.
+
+\paragraph{Extended comparison to prior weightless / removal lines.} OLMo's non-parametric LayerNorm~\citep{olmo2} is a training-time architectural choice: the model is trained from the start without learnable normalization weights, so there is no transformation of an existing checkpoint. \citet{remove-norm2} target post-hoc LayerNorm removal in GPT-2 XL via an empirically tuned ablation procedure that recovers benchmark quality but is not a closed-form algebraic identity. FlashNorm Proposition~\ref{prop:weightless} differs in three ways relevant to deployment: (i) it is exact in real arithmetic and bit-identical when the fold is performed at the same precision as the runtime, so no quality recovery procedure is required; (ii) it applies to any pretrained RMSNorm checkpoint without modification of training; and (iii) Proposition~\ref{prop:commute} additionally exposes parallel execution of the RMS scalar with the matmul (Corollary~\ref{cor:parallel}), which the prior lines do not address.
+
+\paragraph{Activation dynamic range under FP8.} The deferred-scaling form of Proposition~\ref{prop:commute} alters the dynamic range of intermediate values: $\mathbf{a}\mathbf{W}^*$ can be substantially larger than $(\mathbf{a}/\mathrm{RMS}(\mathbf{a}))\mathbf{W}^*$ for outlier-prone activations. At FP16/BF16 storage with FP32 accumulators (the default in modern inference servers), the unnormalized intermediate fits within range for the activation distributions encountered in practice. FP8 is a separate concern: the E4M3 layout has a maximum representable value of approximately 448, and large-LLM activations are known to contain outliers exceeding this in absolute magnitude after the matmul. FP8 deployments therefore require either a higher-precision accumulator, per-channel scaling of $\mathbf{W}^*$, or a return to the standard (non-deferred) scaling order.
+
+\paragraph{Quantization interaction (per-row analysis).} The fold $\mathbf{W}^*_{i,j} = g_i \cdot \mathbf{W}_{i,j}$ scales each row of $\mathbf{W}$ by the corresponding $g_i$. When $\mathbf{g}$ has small variation across channels, $\mathbf{W}^*$ has similar dynamic range to $\mathbf{W}$ and existing per-channel quantization recipes carry over unchanged; when $\mathbf{g}$ has wide variation, $\mathbf{W}^*$ has rows of disparate magnitudes, making per-channel rather than per-tensor quantization the natural target. The composition is in the same family as SmoothQuant's per-channel-scale absorption~\citep{smoothQuant}, with the practical difference that FlashNorm's $\mathbf{g}$ is the existing trained RMSNorm weight rather than an introduced calibration scale. A systematic empirical study (perplexity, MMLU, HellaSwag, and bits-per-weight across int8, int4, and NF4 with the fold applied before vs.\ after quantization) is left to future work.
 
 While the speedup on the norm-then-project operation itself is significant (33--35\%), the end-to-end model speedup is modest because this operation is a fraction of total layer time. For comparison, we measured a throughput of 204 tokens per second for OpenELM-270M with 4-bit weight quantization using the MLX framework on an M1 MacBook Air. This throughput increases to only 225 tokens per second when we remove RMSNorm entirely, giving an upper bound of $\leq$ 10\% for this model. Native integration into inference frameworks at the kernel level---where stream management overhead is negligible---would allow the 33--35\% operation-level improvement to translate more directly into end-to-end gains, particularly for larger models with bigger GEMMs.
 
