@@ -37,10 +37,6 @@
 \def\sini{\sin{(\cdot)}}              % sin(.)
 
 \title{FlashNorm: Fast Normalization for Transformers}
-%\title{FlashNorm: Fast and Exact Normalization for Transformers}
-%\title{FlashNorm: fast normalization for LLMs}
-%\title{Flash normalization: fast normalization for LLMs}
-%\title{Flash normalization: fast RMSNorm for LLMs}
 
 \author{Nils Graef\thanks{\texttt{info@openmachine.ai}}, \, Filip Makraduli, \, Andrew Wasielewski, \, Matthew Clapp \\
   \href{https://openmachine.ai}{OpenMachine}}
@@ -56,11 +52,10 @@ RMSNorm followed by a linear layer that (i) eliminates the normalization weights
 by folding them into the subsequent linear layer, and (ii) defers the scalar
 RMS normalization to the output of the matrix multiplication, enabling the two
 operations to execute in parallel.
+%FlashNorm is mathematically identical to RMSNorm---it introduces
+%no approximation and requires no retraining.
 The same techniques extend to LayerNorm and  Dynamic Tanh (DyT).
-% FlashNorm is mathematically identical to the original computation---it introduces
-% no approximation and requires no retraining.
 And due to RMS scale invariance, a linear layer between two RMSNorms makes the
-%first one redundant---a mathematically identical simplification that removes the
 first one redundant, removing the pre-attention RMSNorm in QKV-normalized models
 (e.g., Gemma~4) and in MLA-models
 with latent normalization (e.g., DeepSeek-V2, Mistral Small 4).
@@ -69,14 +64,13 @@ lower latency on the norm-then-project operation in the compute-bound (prefill)
 regime at SmolLM2-135M scale, and \textbf{12--14\%} at Llama-7B scale.
 On an NVIDIA A100, FlashNorm achieves a \textbf{13\%} end-to-end speedup
 at decode on Llama-3.2-1B in HuggingFace Transformers.
-% via PyTorch's existing weightless C++ kernel (Appendix~\ref{app:rmsnorm-fraction}).
 We verify zero-loss weight folding on three models.
 Beyond inference speed, FlashNorm simplifies model implementations by
 reducing parameter tensor count.
 Watch our explainer video \citep{flashNorm-video} and see
 \citep{tricks} for code.
-% TODO: for conference submissions, remove the last sentence!
 \end{abstract}
+
 \begin{figure}[h!] \centering  % the [h!] tries to place the picture right here
   \includegraphics[scale=0.8]{../doc/fig/flashNorm_fig1.pdf}
   \caption{Mathematically identical implementations of RMSNorm followed by a linear layer.
@@ -101,9 +95,6 @@ dedicated vector units (for element-wise ops) and matrix units (for matrix multi
 RMS value must be fully computed \emph{before} the linear layer can begin, because
 the normalized activations are its input. The matrix unit therefore sits idle during
 the RMS calculation, a bottleneck that compounds across all transformer layers and inference calls.
-
-% TODO: is it ok to remove below?
-%For GPUs, the bottleneck is most acute in the autoregressive decode regime that dominates production inference serving. At batch size one, each transformer layer launches two small, memory-bound kernels (RMSNorm followed by a linear projection), and the fixed per-launch overhead compounds across all layers and all generated tokens. Production inference engines such as vLLM~\citep{vLLM}, SGLang~\citep{sglang}, and TensorRT-LLM mitigate this with fused \texttt{RMSNorm+linear} kernels that read the activation from HBM once and keep the intermediate in cache. These fused kernels assume the standard RMSNorm-then-project dataflow; a FlashNorm-folded checkpoint loads correctly but cannot exploit the fused fast path without engine-side changes. Bridging this gap, while preserving exact mathematical equivalence to the original model, is the practical problem we address.
 
 We address this bottleneck with \textbf{FlashNorm}, which makes two
 mathematically equivalent transformations to the RMSNorm-then-project pipeline shown in
@@ -141,19 +132,12 @@ DyT~\citep{DyT}, GLU-variant FFNs~\citep{GLU}, and RoPE-based attention~\citep{R
         Mistral Small 4 \citep{mistral4}, OpenMythos \citep{openMythos}).
   \item We present FlashNorm as a unified framework covering RMSNorm, LayerNorm,
         DyT, GLU-FFNs, and attention with RoPE.
- %\item We provide a complete hardware timing analysis demonstrating the bottleneck
- %      that FlashNorm eliminates.
   \item We verify zero-loss weight-folding on SmolLM2-135M, Llama-3.2-1B, and
         Llama-3.1-8B across wikitext, MMLU, and HellaSwag (Table~\ref{tab:quality}),
         and report operation-level speedups on T4, A100, and H100.
   \item And we identify the kernel-engineering work required to extend to
         compute-bound regimes and provide a reference design.
 \end{itemize}
-% previous version:
-%  \item \textbf{Exact reformulation.} Two commutativity results (Propositions~\ref{prop:weightless} and~\ref{prop:commute}) characterize when weight folding and deferred scaling preserve the bias-free RMSNorm-then-project computation.
-%  \item \textbf{Unified coverage.} The same transformations extend to LayerNorm, Dynamic Tanh~\citep{DyT}, GLU-variant FFNs~\citep{GLU}, and RoPE-based attention~\citep{RoPE} including QK-normalization.
-%  \item \textbf{Quality and GPU evidence at three model scales and three GPU generations.} We verify zero-loss folding on SmolLM2-135M, Llama-3.2-1B, and Llama-3.1-8B across wikitext, MMLU, and HellaSwag (Table~\ref{tab:quality}), and report operation-level speedups on T4, A100 (Triton prototype in Section~\ref{sec:a100-fused} and fused WMMA decode wins in Appendix~\ref{app:a100-decode}), and H100 (CUTLASS 3.x Sm90 reference benchmarked against HuggingFace and flashinfer~\citep{flashInfer} in Appendix~\ref{app:h100-cutlass}).
-%  \item \textbf{Public artifacts and production path.} We release three public compatibility checkpoints that load unmodified in stock HuggingFace Transformers and vLLM. We also identify the specific kernel-engineering work required (shape-specialized tile dispatch and custom \texttt{CollectiveMainloop}) to extend fusion wins to Llama-family compute-bound regimes, and provide a reference design for that extension.
 
 \section{Background and Related Work}
 
@@ -183,7 +167,8 @@ practice in quantization-aware training and model deployment~\citep{quantJacob, 
 and \verb+torch.compile+ can perform it automatically~\citep{torchCompileFuse}.
 OLMo~1 models use weightless LayerNorm, which they call
 \emph{non-parametric}~\citep{olmo2}. FlashNorm applies analogous reasoning to
-normalization weights of RMSNorm and LayerNorm; see Appendix~\ref{app:additional-notes} for an extended comparison to \citet{remove-norm2} and the OLMo line.
+normalization weights of RMSNorm and LayerNorm; see Appendix~\ref{app:additional-notes}
+for an extended comparison to \citep{remove-norm2} and OLMo~1.
 
 \paragraph{FlashAttention.}
 FlashAttention~\citep{flash-attention} is the closest conceptual predecessor:
@@ -219,7 +204,6 @@ be stored or applied separately.
 \begin{proof}
 $z_j = \sum_i \frac{a_i}{\mathrm{RMS}(\mathbf{a})} g_i W_{i,j}
      = \sum_i \frac{a_i}{\mathrm{RMS}(\mathbf{a})} W^*_{i,j} $.
-     % = \frac{1}{\mathrm{RMS}(\mathbf{a})} \sum_i a_i W^*_{i,j}
 \end{proof}
 
 This proposition holds for linear layers with or without a bias term at the output.
@@ -267,8 +251,6 @@ applies, but the normalization must precede the bias addition.
 
 \begin{remark}[Unfolded case]
 Proposition~\ref{prop:commute} requires only that $1/\mathrm{RMS}(\mathbf{a})$ be a per-token scalar. Propositions~\ref{prop:weightless} and~\ref{prop:commute} are therefore independent: a framework implementing deferred normalization alone obtains the parallel-execution and fused-kernel speedups (Corollary~\ref{cor:parallel} and Appendix~\ref{app:a100}) for any existing RMSNorm checkpoint, with no weight-folding required.
-% before:
-%The commutativity in Proposition~\ref{prop:commute} depends only on $1/\mathrm{RMS}(\mathbf{a})$ being a scalar per token; it holds identically if $\mathbf{W}^*$ is replaced by the unfolded $\mathbf{W}$. Deferred normalization can therefore be applied at runtime to any RMSNorm-based model without modifying its checkpoint. Propositions~\ref{prop:weightless} and~\ref{prop:commute} are thus independent transformations that can be adopted separately or together: a framework that implements deferred normalization alone delivers the parallel-execution and fused-kernel speedups (Corollary~\ref{cor:parallel} and Appendix~\ref{app:a100}) to every existing RMSNorm-based checkpoint, without requiring a weight-folded variant.
 \end{remark}
 
 Figure~\ref{fig1} illustrates the three mathematically equivalent
@@ -295,7 +277,6 @@ and $\frac{1}{\mathrm{RMS}(\mathbf{c})}$ is $s_a \cdot \frac{1}{\mathrm{RMS}(\ma
 = s_a \cdot \frac{1}{s_a \cdot \mathrm{RMS}(\mathbf{b})} = \frac{1}{\mathrm{RMS}(\mathbf{b})}$,
 and therefore $\mathrm{RMSNorm}(\mathbf{c}) = \mathrm{RMSNorm}(\mathbf{b})$.
 \end{proof}
-%Thus, whenever a weightless RMSNorm is immediately followed by a bias-free linear layer and then another RMSNorm, the first normalization is redundant and can be removed as illustrated in Fig.~\ref{fig6}(b).
 \paragraph{Eliminating pre-attention RMSNorm with QKV-normalization.}
 Some models such as Gemma~4 \citep{gemma4} apply QKV-normalization~\citep{qkv-norm} to
 queries, keys, \emph{and values}. The sequence is:
@@ -304,8 +285,6 @@ By Proposition~\ref{prop:rms-cancel}, the pre-attention RMSNorm cancels and can 
 dropped entirely, saving one full RMSNorm per each transformer block.
 
 \paragraph{Eliminating pre-attention RMSNorm with MLA latent normalization.}
-%Multi-head Latent Attention (MLA) compresses querries, keys, and values into a low-rank
-%latent space that is normalized before being projected back to full dimension.
 The sequence for MLA with latent normalization is:
 pre-attention RMSNorm $\to$ down-projection into latent space $\to$ latent RMSNorm,
 which matches the pattern of Proposition~\ref{prop:rms-cancel} exactly.
@@ -349,9 +328,7 @@ multiplication and RMS calculation.
 
 \subsection{Folding Mean Centering into a Preceding Linear Layer}
 LayerNorm applies mean centering before RMSNorm. If mean centering is preceded by a
-linear layer with weights $\mathbf{V} \in \mathbb{R}^{m \times n}$ (the algebra below is
-written for the general rectangular case; the square case $m = n$ is the special case
-used in many transformer sublayers), the centering
+linear layer with weights $\mathbf{V} \in \mathbb{R}^{m \times n}$, the centering
 can be absorbed into $\mathbf{V}$ without retraining, see Fig. \ref{figB}: The mean $\mu$ is
 calculated from the linear layer outputs $y_j$ as
 $\mu = \frac{1}{n} \sum_j y_j$ where $y_j = \sum_i x_i V_{i,j}$.
@@ -366,8 +343,9 @@ The mean-centered outputs are now
        = \sum_{i=1}^m x_i \underbrace{\left( V_{i,j} - \frac{s_i}{n} \right)}_{V^*_{i,j}},
 \end{equation*}
 so the modified weights $V^*_{i,j} = V_{i,j} - s_i/n$ absorb the mean centering
-entirely, see Fig. \ref{figB}(b). This provides a recipe for converting a LayerNorm model
-to RMSNorm without retraining; for transformers with a residual stream, the same transformation must be applied to every projection that injects into the residual stream (token embeddings, attention output projection, FFN down-projection, and any other architecture-specific contributors) so that the input to each LayerNorm is exactly zero-mean.
+entirely, see Fig. \ref{figB}(b). This provides a lossless recipe for converting a
+LayerNorm model to RMSNorm without retraining; see Appendix~\ref{app:additional-notes}
+for the residual-stream completeness condition.
 \begin{figure}[h!] \centering  % the [h!] tries to place the picture right here
   \includegraphics[scale=0.8]{../doc/fig/flashNorm_figB.pdf}
   \caption{Elimination of mean centering: (a) Original weight matrix $\mV$ followed by mean centering. (b) Optimized version where the mean centering is merged into the modified weight matrix $\V*$.}
@@ -378,8 +356,9 @@ to RMSNorm without retraining; for transformers with a residual stream, the same
 \subsection{FlashNorm for FFNs with GLU Variants}
 For GLU-variant FFNs~\citep{GLU}, the FlashNorm at the FFN
 input requires scaling at both the Gate and Up projection outputs, see Fig. \ref{fig3}(a).
-One of these scaling operations can be deferred to the FFN output, saving $f - n$ multiply operations
-relative to (a) as shown in Fig. \ref{fig3}(b) (the savings are with respect to the baseline of scaling at both $f$-dimensional Gate and Up outputs in (a); the absolute multiply count of (b) is $f + n$, vs $2f$ in (a)). See appendix for FFNs with ReLU, ReGLU and Bilinear GLU variants.
+One of these scaling operations can be deferred to the FFN output, saving $f - n$
+multiply operations relative to Fig. \ref{fig3}(a) as shown in Fig. \ref{fig3}(b).
+See appendix for FFNs with ReLU, ReGLU and Bilinear GLU variants.
 \begin{figure}[h!] \centering
   \includegraphics[scale=0.8]{../doc/fig/flashNorm_fig3.pdf}
   \caption{FFN with GLU variant and preceding FlashNorm: (a) unoptimized version; (b) optimized version with fewer scaling multipliers.}
@@ -399,21 +378,6 @@ dot-product factor can be folded into the same scaling operation.
   \includegraphics[scale=0.8]{../doc/fig/flashNorm_fig5.pdf}
   \caption{FlashNorm for scaled dot-product attention with RoPE: (a) unoptimized version; (b) optimized version where the normalization is fused with $\cosi$ and $\sini$.}
 \label{fig5} \end{figure}
-
-% OLD TEXT FOR Attention with RoPE
-%Fig. \ref{fig5}(a) shows the Q and K linear layers with FlashNorm followed by RoPE \citep{RoPE} and scaled dot-product attention \citep{vanilla}. More details on Figure \ref{fig5}:
-%\begin{itemize}[topsep=-1pt]
-%  \item Q* and K* are the linear layers for Q (queries) and K (keys) fused with the normalization weights of the activation vector $\a$ (according to FlashNorm).
-%  \item $h$ is the dimension of the attention heads.
-%  \item The boxes labeled cos, sin, and RoPE perform $\vy = \vx \cdot \cosi + \text{permute}(\vx) \cdot \sini$, where
-%  \begin{itemize}[topsep=-1pt]
-%    \item $\text{permute}(\vx) = (-x_2, x_1, -x_4, x_3, \dots, -x_h, x_{h-1})$, see equation (34) of \citep{RoPE} for more details.
-%    \item $\cosi = (\cos m \theta_1, \cos m \theta_1, \cos m \theta_2, \cos m \theta_2, \dots, \cos m \theta_{h/2}, \cos m \theta_{h/2})$ for position $m$.
-%    \item $\sini = (\sin m \theta_1, \sin m \theta_1, \sin m \theta_2, \sin m \theta_2, \dots, \sin m \theta_{h/2}, \sin m \theta_{h/2})$ for position $m$.
-%  \end{itemize}
-%  \item Note that $\cosi$ and $\sini$ only depend on the position of activation vector $\a$ and are shared among all attention heads. Therefore, it’s more efficient to first scale $\cosi$ and $\sini$ by $1/ \rms$ as illustrated in Fig. \ref{fig5}(b). This saves $2hH - h$ multipliers, where $H$ is the number of attention heads.
-%  \item Furthermore, we can fuse the scaling factor $1/ \sqrt{h}$ of the scaled dot-product with the $1/ \rms$ factor (note that we need to use $\sqrt{1/ \sqrt{h}}$ as a scaling factor for this).
-%\end{itemize}
 
 \subsection{QK-Normalization}\label{sec:qknorm}
 Gemma~3~\citep{gemma3}, OLMo~2~\citep{olmo2}, OpenELM~\citep{openelm} and other LLMs
@@ -462,7 +426,8 @@ Fig.~\ref{fig8} shows timing diagrams for the example $n = 512$ and $m = 128$.
 Without FlashNorm (sequential execution), the matrix unit cannot begin until both
 the RMS and the scaling are complete, imposing an 8 cycle bubble as shown in Fig.~\ref{fig8}(a).
 The subsequent vector-matrix multiply takes $(512)^2 / (128)^2 = 16$ cycles; the total is 24 cycles.
-With row-major ordering, once the RMS accumulation completes and the scalar $1/\mathrm{RMS}(\mathbf{a})$ becomes available, the first rows of $\mathbf{W}^*$ can be processed while later elements are still being scaled by that scalar. This overlap of the matrix unit with the element-wise scaling reduces the bubble
+With row-major ordering, the first rows of $\mathbf{W}^*$ can be processed
+while later elements are still being scaled, reducing the bubble
 to 5 cycles (total: 21 cycles), but the bottleneck persists, see Fig.~\ref{fig8}(b).
 With FlashNorm, the vector-matrix multiply ($\mathbf{a}\mathbf{W}^*$) and
 the RMS calculation proceed fully in parallel on separate units as shown in Fig.~\ref{fig8}(c).
@@ -474,29 +439,15 @@ Total execution: 17 cycles---a \textbf{29\% reduction} versus the sequential bas
     (a) Sequential: matrix unit idles 8 cycles.
     (b) Partial overlap with interleaved scaling and vector-matrix multiplication.
     (c) \textbf{FlashNorm}: vector-matrix multiply and RMS run fully in parallel.}
-    %; 17 cycles total, a 29\% reduction over (a).}
 \label{fig8} \end{figure}
-% OLD, more details:
-%\begin{itemize}[topsep=-1pt]
-%  \item The matrix multiplications of the linear layers are performed by the matrix unit,
-%        while the vector unit performs vector-wise operations such as RMSNorm and FlashNorm.
-%  \item Let’s assume that the vector unit can perform $m$ operations per cycle and the matrix
-%        unit can perform $m^2$ operations per cycle, where $m$ is the processor width. Specifically:
-%  \begin{itemize}[topsep=-1pt]
-%    \item Multiplying an $n$-element vector with an $n \times n$ matrix takes $n^2$ MAD (multiply-add)
-%          operations, which takes $n^2/m^2$ cycles with our matrix unit.
-%    \item Calculating $1/\rms$ takes $n$ MAD operations (for squaring and adding) plus 2 scalar
-%          operations (for $\sqrt{n/x}$), which takes $n/m$ cycles with our vector unit if we ignore
-%          the 2 scalar operations.
-%    \item Scaling an $n$-element vector by a scaling factor takes $n$ multiply operations,
-%          which takes $n/m$ cycles.
-%  \end{itemize}
-%\end{itemize}
 
 \section{Experiments}\label{sec:experiments}
 Refer to \citep{hfFlashNorm, tricks} for Python code that demonstrates the mathematical equivalency of the optimizations presented in this paper. A reproducible Colab notebook for the GPU benchmarks below is available in the \verb+transformer-tricks+ repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_gpu\_benchmark.ipynb}}.
 
-We verified lossless weight folding on SmolLM2-135M \citep{smollm}, Llama-3.2-1B, and Llama-3.1-8B \citep{LLaMA} using \verb+flashify_repo()+ from the \verb+transformer-tricks+ package \citep{tricks}. On SmolLM2-135M under HuggingFace Transformers at fp16, the original and weight-folded models produce logits that match within the fp16 representation precision (cosine similarity $= 1.0$) and identical greedy generated text; at Llama-3.2-1B and Llama-3.1-8B scales under fp32 inference, greedy generation is likewise equivalent to the source. Table~\ref{tab:quality} reports source-vs-flashified deltas across three model scales and three standard benchmarks (wikitext word perplexity, MMLU 5-shot accuracy, HellaSwag zero-shot accuracy): every delta is within benchmark noise, empirically consistent with the mathematical exactness of Propositions~\ref{prop:weightless} and~\ref{prop:commute}. Three public compatibility checkpoints are available under \url{https://huggingface.co/open-machine} and load unmodified in stock HuggingFace Transformers and vLLM.
+We verified lossless weight folding on SmolLM2-135M \citep{smollm}, Llama-3.2-1B, and Llama-3.1-8B \citep{LLaMA}
+using \verb+flashify_repo()+ from the \verb+transformer-tricks+ package \citep{tricks}.
+On SmolLM2-135M under HuggingFace Transformers at fp16, the original and weight-folded models produce logits that match within the fp16 representation precision (cosine similarity $= 1.0$) and identical greedy generated text; at Llama-3.2-1B and Llama-3.1-8B scales under fp32 inference, greedy generation is likewise equivalent to the source. Table~\ref{tab:quality} reports source-vs-flashified deltas across three model scales and three standard benchmarks (wikitext word perplexity, MMLU 5-shot accuracy, HellaSwag zero-shot accuracy): every delta is within benchmark noise, empirically consistent with the mathematical exactness of Propositions~\ref{prop:weightless} and~\ref{prop:commute}.
+Three public compatibility checkpoints are available under \url{https://huggingface.co/open-machine} and load unmodified in stock HuggingFace Transformers and vLLM.
 
 \begin{table}[h!] \centering
 \caption{Quality preservation across model scales and standard benchmarks, via \texttt{lm-evaluation-harness} with fp16 inference on an NVIDIA A100 (wikitext at 2048-token context, MMLU at 4096-token context for 5-shot prompts, HellaSwag at 2048-token context). Deltas between source and FlashNorm-folded checkpoints are within benchmark noise at every row, empirically consistent with the mathematical exactness of Propositions~\ref{prop:weightless} and~\ref{prop:commute}.}
@@ -531,32 +482,9 @@ Tokens & Sequential & FlashNorm & Latency reduction & Path \\
 \end{tabular}
 \end{table}
 
-\begin{table}[!htbp] \centering
-\caption{Norm-then-project latency on T4 GPU at Llama-7B scale ($n{=}4096, k{=}4096$).}
-\label{tab:overlap7b}
-\begin{tabular}{r r r r l}
-\hline
-Tokens & Sequential & FlashNorm & Latency reduction & Path \\
-\hline
-1      & 0.641\,ms & 0.641\,ms & $0.0$\% & sequential (fallback) \\
-64     & 0.307\,ms & 0.307\,ms & $0.0$\% & sequential (fallback) \\
-256    & 0.577\,ms & 0.577\,ms & $0.0$\% & sequential (fallback) \\
-1024   & 1.882\,ms & 1.654\,ms & $+$12.1\% & parallel (overlap) \\
-4096   & 7.628\,ms & 6.570\,ms & $+$13.9\% & parallel (overlap) \\
-\hline
-\end{tabular}
-\end{table}
-
 FlashNorm uses adaptive dispatch: the parallel path is used only when the GEMM is compute-bound (token count exceeds a hardware-dependent threshold). For memory-bound workloads such as autoregressive decoding, FlashNorm falls back to sequential execution (0\% overhead). This is because managing parallel CUDA streams introduces scheduling overhead that exceeds the time saved when the GEMM is small. At autoregressive decode on \texttt{Llama-3.2-1B-Instruct} in HuggingFace Transformers, RMSNorm operations occupy 24.6\% of total wall-clock at bf16, an order of magnitude above their FLOP share; the cumulative norm cost is invariant under weight quantization, so the relative impact of FlashNorm grows in deployments that aggressively quantize linears (Appendix~\ref{app:rmsnorm-fraction}).
 
 \section{Limitations and Discussion}\label{sec:limitations-discussion}
-
-%\paragraph{TODO: PERHAPS REMOVE THIS: When to use FlashNorm.}
-%FlashNorm provides the largest benefit in prefill-dominated workloads with long
-%sequences and large hidden dimensions. For single-token decoding,
-%the simplification benefit (fewer parameter tensors, simpler compute graph) is
-%the primary advantage, not latency. Practitioners should benchmark their specific
-%hardware and batch size before deploying the parallel-stream variant in production.
 
 \paragraph{Relationship to quantization.}
 FlashNorm is orthogonal to weight quantization. In fact, folding normalization
@@ -570,12 +498,6 @@ For implementations utilizing low-precision fixed-point activations, FlashNorm's
 normalization may trigger overflows during matrix multiplication, as noted in \citep{MXNorm}.
 However, the majority of contemporary frameworks employ floating-point activations alongside
 either fixed-point or floating-point weights, which inherently mitigates this risk.
-
-%\paragraph{TODO: Epsilon and numerical precision.}
-%The $\varepsilon$-RMS variant $\mathrm{RMS}_\varepsilon(\mathbf{a}) = \sqrt{\varepsilon + \frac{1}{n}\sum a_i^2}$ breaks exact scale-invariance: $\mathrm{RMS}_\varepsilon(s \cdot \mathbf{a}) \neq s \cdot \mathrm{RMS}_\varepsilon(\mathbf{a})$. However, $\varepsilon$ only has practical effect when $\mathrm{RMS}(\mathbf{a}) \ll \sqrt{\varepsilon}$, i.e., for near-zero activation vectors. In this regime the epsilon's role is to bound the magnitude of the scaling factor, not to preserve normalization fidelity, so the approximation is benign. Appendix~\ref{app:epsilon} provides the full derivation.
-
-%\paragraph{Two sources of speedup.}
-%FlashNorm's speedup decomposes into two mathematically independent sources. Weight-fold savings (Proposition~\ref{prop:weightless}) eliminate the per-channel multiply by $\mathbf{g}$ inside the RMSNorm kernel; this source is universal and architecture-agnostic, but modest in absolute magnitude. Kernel-fusion savings eliminate one kernel launch, one intermediate activation allocation, and an HBM round-trip on the normalized activations, yielding a fixed per-call reduction of approximately 15 to 25\,$\mu$s on modern GPUs that is independent of model scale. The T4 results of Section~\ref{sec:experiments} isolate the fusion source via adaptive CUDA streaming; the A100 prototype of Section~\ref{sec:a100-fused} realizes both sources inside a single kernel. Appendix~\ref{app:a100} provides a quantitative decomposition and analyzes when each source is observable as a net speedup in the presence of the vendor's tuned matmul kernels.
 
 \paragraph{Simplification as a primary benefit.}
 Beyond raw speed, FlashNorm simplifies model implementations in a manner analogous
@@ -591,14 +513,13 @@ enabling parallel execution.
 We further showed (3) that RMS scale invariance allows an RMSNorm--linear--RMSNorm sequence
 to drop the first RMSNorm entirely, removing the pre-attention RMSNorm in models
 with QKV-normalization (e.g., Gemma~4) or MLA latent normalization (e.g., DeepSeek, Mistral, OpenMythos).
-%The technique extends to LayerNorm, DyT, GLU-FFNs, and RoPE attention.
-GPU benchmarks confirm 33--35\% operation-level latency reduction at the SmolLM2-135M scale and 12--14\% at the Llama-7B scale
+GPU benchmarks confirm 33--35\% operation-level latency reduction at
+the SmolLM2-135M scale and 12--14\% at the Llama-7B scale
 in the compute-bound prefill regime, with identical outputs verified on
 SmolLM2-135M, Llama-3.2-1B, and Llama-3.1-8B.
 In the memory-bound decode regime, stream management overhead
 currently negates the speedup, motivating native kernel-level integration as the
 primary direction for future work.
-% TODO: perhaps modify above sentence, just say we need a native fused kernel for flashNorm
 
 Future integration targets include
 vLLM~\citep{vLLM}, SGLang~\citep{sglang}, FlashInfer~\citep{flashInfer},
@@ -623,6 +544,22 @@ The FlashNorm transformation is mathematically exact (Propositions~\ref{prop:wei
 \paragraph{Activation dynamic range under FP8.} The deferred-scaling form of Proposition~\ref{prop:commute} alters the dynamic range of intermediate values: $\mathbf{a}\mathbf{W}^*$ can be substantially larger than $(\mathbf{a}/\mathrm{RMS}(\mathbf{a}))\mathbf{W}^*$ for outlier-prone activations. At FP16/BF16 storage with FP32 accumulators (the default in modern inference servers), the unnormalized intermediate fits within range for the activation distributions encountered in practice. FP8 is a separate concern: the E4M3 layout has a maximum representable value of approximately 448, and large-LLM activations are known to contain outliers exceeding this in absolute magnitude after the matmul. FP8 deployments therefore require either a higher-precision accumulator, per-channel scaling of $\mathbf{W}^*$, or a return to the standard (non-deferred) scaling order.
 
 \paragraph{Quantization interaction (per-row analysis).} The fold $\mathbf{W}^*_{i,j} = g_i \cdot \mathbf{W}_{i,j}$ scales each row of $\mathbf{W}$ by the corresponding $g_i$. When $\mathbf{g}$ has small variation across channels, $\mathbf{W}^*$ has similar dynamic range to $\mathbf{W}$ and existing per-channel quantization recipes carry over unchanged; when $\mathbf{g}$ has wide variation, $\mathbf{W}^*$ has rows of disparate magnitudes, making per-channel rather than per-tensor quantization the natural target. The composition is in the same family as SmoothQuant's per-channel-scale absorption~\citep{smoothQuant}, with the practical difference that FlashNorm's $\mathbf{g}$ is the existing trained RMSNorm weight rather than an introduced calibration scale. A systematic empirical study (perplexity, MMLU, HellaSwag, and bits-per-weight across int8, int4, and NF4 with the fold applied before vs.\ after quantization) is left to future work.
+
+\begin{table}[h!] \centering
+\caption{Norm-then-project latency on T4 GPU at Llama-7B scale ($n{=}4096, k{=}4096$).}
+\label{tab:overlap7b}
+\begin{tabular}{r r r r l}
+\hline
+Tokens & Sequential & FlashNorm & Latency reduction & Path \\
+\hline
+1      & 0.641\,ms & 0.641\,ms & $0.0$\% & sequential (fallback) \\
+64     & 0.307\,ms & 0.307\,ms & $0.0$\% & sequential (fallback) \\
+256    & 0.577\,ms & 0.577\,ms & $0.0$\% & sequential (fallback) \\
+1024   & 1.882\,ms & 1.654\,ms & $+$12.1\% & parallel (overlap) \\
+4096   & 7.628\,ms & 6.570\,ms & $+$13.9\% & parallel (overlap) \\
+\hline
+\end{tabular}
+\end{table}
 
 While the speedup on the norm-then-project operation itself is significant (33--35\%), the end-to-end model speedup is modest because this operation is a fraction of total layer time. For comparison, we measured a throughput of 204 tokens per second for OpenELM-270M with 4-bit weight quantization using the MLX framework on an M1 MacBook Air. This throughput increases to only 225 tokens per second when we remove RMSNorm entirely, giving an upper bound of $\leq$ 10\% for this model. Native integration into inference frameworks at the kernel level---where stream management overhead is negligible---would allow the 33--35\% operation-level improvement to translate more directly into end-to-end gains, particularly for larger models with bigger GEMMs.
 
@@ -718,7 +655,8 @@ where $\text{RSSe}(\a) = \sqrt{n \varepsilon + \sas}$.
 
 \section{RMSNorm Decode-Time Fraction Across Precisions}\label{app:rmsnorm-fraction}
 
-\paragraph{Setup.} \texttt{Llama-3.2-1B-Instruct} loaded in HuggingFace Transformers on a single NVIDIA A100 (40\,GB) at bf16, 8-bit BitsAndBytes, and 4-bit BitsAndBytes (NF4 with double quantization) \citep{bitsandbytes}. For each precision, 20 trials of greedy decode generating 256 tokens after 3 warmup runs. CUDA-event hooks attached to every \texttt{LlamaRMSNorm} module record per-call start/end timestamps; cumulative RMSNorm time per generation is summed across all 33 norm calls per forward pass and reported alongside externally-measured total decode wall-clock. Reproducibility notebook in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_decode\_profile.ipynb}}.
+\paragraph{Setup.} \texttt{Llama-3.2-1B-Instruct} loaded in HuggingFace Transformers on a single NVIDIA A100 (40\,GB) at bf16, 8-bit BitsAndBytes, and 4-bit BitsAndBytes (NF4 with double quantization) \citep{bitsandbytes}. For each precision, 20 trials of greedy decode generating 256 tokens after 3 warmup runs. CUDA-event hooks attached to every \texttt{LlamaRMSNorm} module record per-call start/end timestamps; cumulative RMSNorm time per generation is summed across all 33 norm calls per forward pass and reported alongside externally-measured total decode wall-clock.
+Reproducibility notebook in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_decode\_profile.ipynb}}.
 
 \begin{table}[h!] \centering
 \caption{RMSNorm wall-clock fraction during 256-token greedy decode on \texttt{Llama-3.2-1B-Instruct}, A100, bf16 inputs, median of 20 trials. Norm time is cumulative across all per-layer RMSNorm calls.}
@@ -734,12 +672,15 @@ bf16                  & $38.5$ & $6{,}650$  & $1{,}640$ & $\mathbf{24.62\%}$ \\
 \end{tabular}
 \end{table}
 
-\paragraph{Findings.} RMSNorm occupies 24.62\% of decode wall-clock at bf16, an order of magnitude above its FLOP share, because the model runs 33 separate RMSNorm kernels per forward pass and each incurs a fixed kernel-launch latency on the order of $10\,\mu$s plus a memory-bandwidth pass over the full activation tensor independent of the small RMS arithmetic. Roughly half of this fraction is recoverable today via a runtime swap of \texttt{LlamaRMSNorm.forward}: on the same hardware, same decode protocol, replacing it with PyTorch's existing weightless C++ kernel \texttt{F.rms\_norm(x, shape, weight=None, eps)} yields a $\mathbf{+12.77\%}$ end-to-end speedup on the FlashNorm-folded variant \texttt{open-machine/Llama-3.2-1B-FlashNorm} ($50.75$ vs $45.00$\,tokens/s)\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_hf\_a100.ipynb}}. The $45.00$\,tokens/s baseline here is the FlashNorm-folded checkpoint executed under the default \texttt{LlamaRMSNorm.forward} (which still performs the per-channel multiply against the all-ones tensor that folding leaves behind); it differs from the $38.5$\,tokens/s baseline in Table~\ref{tab:rmsnorm-fraction}, which is the unfolded \texttt{unsloth/Llama-3.2-1B-Instruct} checkpoint measured in a separate Colab session for the cumulative-norm-fraction analysis. The $+12.77\%$ measurement is consequently a same-checkpoint, same-session A-vs-B comparison and isolates the contribution of the kernel-side dispatch swap from any checkpoint or session variability. The same measurement combines two independent contributions: (i) elision of the per-channel multiply (FlashNorm Proposition~\ref{prop:weightless}), and (ii) kernel fusion (replacing the multi-kernel manual variance-plus-rsqrt-plus-multiply path of \texttt{LlamaRMSNorm.forward} with a single fused C++ kernel call). The fusion contribution is independently established by public benchmarks of PyTorch's fused \texttt{torch.nn.functional.rms\_norm} kernel against the unfused PyTorch path on equivalent shapes; the multiply-elision contribution is independently established by kernel-isolated benchmarks of weightless vs. weighted RMSNorm kernels (e.g., the concurrent third-party PyPTX measurement at ${\sim}1.05\times$ on H100 fp32\footnote{\url{https://github.com/patrick-toulme/pyptx/issues/2}}). The two-source decomposition that explains the magnitude of our $+12.77\%$ end-to-end measurement is therefore consistent with the literature, with multiply elision the minority component and kernel fusion the majority.
+\paragraph{Findings.} RMSNorm occupies 24.62\% of decode wall-clock at bf16, an order of magnitude above its FLOP share, because the model runs 33 separate RMSNorm kernels per forward pass and each incurs a fixed kernel-launch latency on the order of $10\,\mu$s plus a memory-bandwidth pass over the full activation tensor independent of the small RMS arithmetic. Roughly half of this fraction is recoverable today via a runtime swap of \texttt{LlamaRMSNorm.forward}: on the same hardware, same decode protocol, replacing it with PyTorch's existing weightless C++ kernel \texttt{F.rms\_norm(x, shape, weight=None, eps)} yields a $\mathbf{+12.77\%}$ end-to-end speedup on the FlashNorm-folded variant
+\texttt{open-machine/Llama-3.2-1B-FlashNorm} ($50.75$ vs $45.00$\,tokens/s)\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_hf\_a100.ipynb}}.
+The $45.00$\,tokens/s baseline here is the FlashNorm-folded checkpoint executed under the default \texttt{LlamaRMSNorm.forward} (which still performs the per-channel multiply against the all-ones tensor that folding leaves behind); it differs from the $38.5$\,tokens/s baseline in Table~\ref{tab:rmsnorm-fraction}, which is the unfolded \texttt{unsloth/Llama-3.2-1B-Instruct} checkpoint measured in a separate Colab session for the cumulative-norm-fraction analysis. The $+12.77\%$ measurement is consequently a same-checkpoint, same-session A-vs-B comparison and isolates the contribution of the kernel-side dispatch swap from any checkpoint or session variability. The same measurement combines two independent contributions: (i) elision of the per-channel multiply (FlashNorm Proposition~\ref{prop:weightless}), and (ii) kernel fusion (replacing the multi-kernel manual variance-plus-rsqrt-plus-multiply path of \texttt{LlamaRMSNorm.forward} with a single fused C++ kernel call). The fusion contribution is independently established by public benchmarks of PyTorch's fused \texttt{torch.nn.functional.rms\_norm} kernel against the unfused PyTorch path on equivalent shapes; the multiply-elision contribution is independently established by kernel-isolated benchmarks of weightless vs. weighted RMSNorm kernels (e.g., the concurrent third-party PyPTX measurement at ${\sim}1.05\times$ on H100 fp32\footnote{\url{https://github.com/patrick-toulme/pyptx/issues/2}}). The two-source decomposition that explains the magnitude of our $+12.77\%$ end-to-end measurement is therefore consistent with the literature, with multiply elision the minority component and kernel fusion the majority.
 Cross-platform variance is significant: the same swap on Apple Silicon MPS yields a net slowdown due to the lack of a vendor-tuned weightless path on that platform; full numbers in the reproducibility notebook. The FlashNorm transformation is exact on every platform, but the realized speedup follows the kernel-quality landscape. The cumulative norm wall-clock is invariant under weight quantization (within $\pm 2\%$ across all three precisions: $1{,}640$, $1{,}675$, $1{,}650$\,ms), as BitsAndBytes does not quantize norm weights. The norm fraction is non-monotonic across precisions on this hardware ($24.62\% \to 8.19\% \to 9.31\%$) because BitsAndBytes inflates the linear path's wall-clock at low bit on A100 (\texttt{MatMul8bitLt} dequantize overhead makes 8-bit $3\times$ slower than bf16; NF4 is more efficient but still $2.7\times$ slower); the fraction shrinks at lower bit not because the norm becomes cheaper but because the BitsAndBytes linear becomes more expensive. On hardware-and-framework combinations with native low-bit kernels (e.g., \texttt{llama.cpp} GGUF, MLX 4-bit on Apple silicon, vLLM and TensorRT-LLM with int4 at scale), the invariant norm cost would translate to a monotonically growing fraction; direct measurement on those stacks is left to follow-up.
 
 \section{Fused Kernel on A100: Full Benchmark and Two-Source Decomposition}\label{app:a100}
 
-This appendix provides the full benchmark results and a quantitative decomposition supporting the A100 fused-kernel prototype summarized in Section~\ref{sec:a100-fused}. The prototype is a pair of Triton~\citep{triton} kernels: a scalar-op decode kernel used when both the token count $M$ and the hidden dimension $K$ are small, and an autotuned tensor-core GEMM kernel used otherwise. The full source and benchmark notebook are available in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_triton\_kernel.ipynb}}.
+This appendix provides the full benchmark results and a quantitative decomposition supporting the A100 fused-kernel prototype summarized in Section~\ref{sec:a100-fused}. The prototype is a pair of Triton~\citep{triton} kernels: a scalar-op decode kernel used when both the token count $M$ and the hidden dimension $K$ are small, and an autotuned tensor-core GEMM kernel used otherwise.
+The full source and benchmark notebook are available in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_triton\_kernel.ipynb}}.
 
 \subsection{Two-source decomposition}
 
@@ -820,7 +761,8 @@ Llama-3.1-8B & 16  & 0.081\,ms & 0.074\,ms & $+$8.5\% \\
 \end{tabular}
 \end{table}
 
-Five of six decode data points (three model scales across $M \in \{1, 16\}$) deliver positive speedup, with the remaining Llama-3.1-8B $M{=}1$ row at parity within measurement noise, confirming that the fusion hypothesis translates to wall-clock wins at the token counts most relevant to production inference. The gap at Llama-3.1-8B $M{=}1$ is attributable to cuBLAS's specialized gemv heuristic path which our uniform-warp kernel cannot match without warp-specialized producer/consumer scheduling. A CUTLASS-based integration in production inference stacks, with warp specialization already present in their kernel infrastructure, would close this remaining gap. The kernel source and reproducibility notebook are available in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_cutlass\_kernel.ipynb}}.
+Five of six decode data points (three model scales across $M \in \{1, 16\}$) deliver positive speedup, with the remaining Llama-3.1-8B $M{=}1$ row at parity within measurement noise, confirming that the fusion hypothesis translates to wall-clock wins at the token counts most relevant to production inference. The gap at Llama-3.1-8B $M{=}1$ is attributable to cuBLAS's specialized gemv heuristic path which our uniform-warp kernel cannot match without warp-specialized producer/consumer scheduling. A CUTLASS-based integration in production inference stacks, with warp specialization already present in their kernel infrastructure, would close this remaining gap.
+The kernel source and reproducibility notebook are available in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_cutlass\_kernel.ipynb}}.
 
 \subsection{H100 validation: CUTLASS 3.x Sm90 production kernel}\label{app:h100-cutlass}
 
@@ -858,7 +800,8 @@ Llama-3.1-8B & 4096 & 0.565 & 0.293 & 0.405 & $+$28.3\% & $-$38.1\% \\
 \end{tabular}
 \end{table}
 
-All 18 shapes deliver positive speedup versus the HuggingFace path ($+$28\% to $+$82\%). Against the optimized FlashInfer plus cuBLAS baseline, V12 wins on 10 of 18 shapes: all SmolLM2-135M scales ($+$42\% to $+$52\%) and Llama-3.2-1B decode ($M \leq 256$, $+$17\% to $+$23\%). V12 loses on 8 shapes: Llama-3.2-1B compute-bound ($M \geq 1024$, $-$33\% to $-$45\%) and all Llama-3.1-8B rows ($-$20\% to $-$66\%). The honest interpretation follows from the two-source decomposition: at scales where Source~B's $15$--$25\,\mu$s fusion saving is a meaningful fraction of call time (SmolLM2 and Llama-1B decode), V12 wins decisively against both baselines; at larger Llama-family shapes, flashinfer's fused RMS kernel is already fast enough ($25$--$80\,\mu$s) that V12's fusion saving is smaller than the matmul penalty incurred by a non-specialized tile selection. The kernel source and reproducibility notebook, including the FlashInfer baseline and decomposed-timing sanity check, are in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_cutlass\_kernel\_sm90.ipynb}}.
+All 18 shapes deliver positive speedup versus the HuggingFace path ($+$28\% to $+$82\%). Against the optimized FlashInfer plus cuBLAS baseline, V12 wins on 10 of 18 shapes: all SmolLM2-135M scales ($+$42\% to $+$52\%) and Llama-3.2-1B decode ($M \leq 256$, $+$17\% to $+$23\%). V12 loses on 8 shapes: Llama-3.2-1B compute-bound ($M \geq 1024$, $-$33\% to $-$45\%) and all Llama-3.1-8B rows ($-$20\% to $-$66\%). The honest interpretation follows from the two-source decomposition: at scales where Source~B's $15$--$25\,\mu$s fusion saving is a meaningful fraction of call time (SmolLM2 and Llama-1B decode), V12 wins decisively against both baselines; at larger Llama-family shapes, flashinfer's fused RMS kernel is already fast enough ($25$--$80\,\mu$s) that V12's fusion saving is smaller than the matmul penalty incurred by a non-specialized tile selection.
+The kernel source and reproducibility notebook, including the FlashInfer baseline and decomposed-timing sanity check, are in the \texttt{transformer-tricks} repository\footnote{\url{https://github.com/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashNorm\_cutlass\_kernel\_sm90.ipynb}}.
 
 \paragraph{Where the losses come from.} The 8 losing rows share a single root cause: V12 instantiates a single \texttt{CollectiveBuilder} variant with \texttt{TileShape}$=\langle 128, 128, 64 \rangle$, which is reasonable for prefill at small to medium scales but suboptimal in two regimes. First, at Llama-3.1-8B decode ($M{=}1$) the tile pads to 128 rows while only one row carries real data, wasting $127/128$ of the tensor-core work; cuBLAS has a specialized gemv heuristic that does not incur this padding. Second, at Llama-family compute-bound shapes cuBLAS selects a differently shaped tile (for instance $256{\times}128$) that achieves higher SM occupancy and cache efficiency than our $128{\times}128$ default. In both regimes the fusion saving is real but is smaller than the matmul-quality gap from a non-specialized tile. This mirrors exactly the two-source decomposition of Appendix~\ref{app:a100}: fusion savings are a fixed per-call quantity, and whether they yield a net win depends on how close the fused matmul runs to the vendor-optimal matmul at that specific shape.
 
