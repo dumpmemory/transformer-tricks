@@ -42,16 +42,16 @@
 \begin{document} \maketitle
 
 \begin{abstract}
-We present MatShrink, a mathematically \emph{exact} method for reducing the parameter count of any pair of consecutive linear layers. Unlike approximate compression techniques such as SVD-based rank reduction or magnitude pruning, MatShrink eliminates an $r \times r$ block of weights via an invertible change of basis on the shared inner dimension $r$, incurring zero accuracy loss by construction. We state and prove the core identity as a formal proposition and establish conditions under which the transformation is numerically stable. We specialize MatShrink to the V-O, Q-K, and latent projections of multi-head attention (MHA), multi-head latent attention (MLA), grouped-query attention (GQA), and multi-query attention (MQA), yielding lossless savings of 8--17\% of per-layer attention parameters across representative models. We identify a bf16 numerical instability caused by ill-conditioned transformation matrices and prove that pivoted QR basis selection minimizes the worst-case condition number among all column-permutation strategies.
+We present MatShrink, a mathematically \emph{exact} method for reducing the parameter count of any pair of consecutive linear layers. Unlike approximate compression techniques such as SVD-based rank reduction or magnitude pruning, MatShrink eliminates an $r \times r$ block of weights via an invertible change of basis on the shared inner dimension $r$, incurring zero accuracy loss by construction. We state and prove the core identity as a formal proposition and establish conditions under which the transformation is numerically stable. We specialize MatShrink to the V-O, Q-K, and latent projections of multi-head attention (MHA), multi-head latent attention (MLA), grouped-query attention (GQA), and multi-query attention (MQA), yielding lossless savings of 8--17\% of per-layer attention parameters across representative models. We identify a bf16 numerical instability caused by ill-conditioned transformation matrices and show that pivoted QR basis selection improves numerical stability.
 Empirical validation on four models (GPT-2-124M, SmolLM2-135M, Gemma-3-1B, Gemma-3-4B) confirms exact fp32 equivalence and near-exact bf16 equivalence, with checkpoints loading directly in HuggingFace Transformers and vLLM without any runtime modification.
 MatShrink is applicable to both inference and training: Existing models can be retrofitted with MatShrink in a mathematically equivalent way, and future models can use MatShrink for both training and inference.
+% TODO: remove below for submission
 See \citep{tricks} for code and more transformer tricks.
 \end{abstract}
 
 \begin{figure}[h!] \centering  % the [h!] tries to place the picture right here
   \includegraphics[scale=0.88]{../doc/fig/matShrink_fig1.pdf}
-  \caption{Mathematically equivalent implementations of two back-to-back weight matrices $W_A$ and $W_B$ with rank $r$, where $d > r$ and $e > r$, which reduces the total number of weights by $r^2$.}
-  % TODO: \caption{Proposition~\ref{prop:matshrink} illustrated: two back-to-back matrices $W_A \in \mathbb{R}^{d \times r}$ and $W_B \in \mathbb{R}^{r \times e}$ (left) are reparametrized so that the leading $r \times r$ block of $W_B$ becomes the identity, saving $r^2$ stored parameters (right). $d > r$ and $e > r$.}
+  \caption{Mathematically equivalent implementations of two back-to-back weight matrices $W_A$ and $W_B$ (left) with rank $r$, where $d > r$ and $e > r$, which reduces the total number of weights by $r^2$ (right).}
 \label{fig1} \end{figure}
 
 \section{Introduction}
@@ -64,9 +64,9 @@ MatShrink is complementary to approximate compression: it applies as a lossless 
 \paragraph{Contributions.}
 \begin{enumerate}[topsep=2pt, itemsep=1pt]
   \item We state and prove MatShrink as a formal proposition and derive the closed-form weight savings (Section~\ref{sec:method}).
-  \item We show that the attention dot-product is preserved under MatShrink applied to Q-K projections, even though the individual queries and keys change, and derive the savings for partial-RoPE models (Section~\ref{sec:mha}).
+  \item We show that the attention dot-product is preserved under MatShrink applied to Q-K projections, even though the individual queries and keys change (Section~\ref{sec:mha}).
   \item We specialize MatShrink to MHA, MLA, GQA, and MQA, quantifying per-model savings and establishing the correct application order for MLA (Sections~\ref{sec:mha}--\ref{sec:gqa}).
-  \item We identify the bf16 numerical instability, diagnose its root cause as ill-conditioned transformation matrices, and show that pivoted QR basis selection is optimal among all column-permutation strategies (Section~\ref{sec:precision}).
+  \item We identify the bf16 numerical instability, diagnose its root cause as ill-conditioned transformation matrices, and show that pivoted QR basis selection improves the numerical stability (Section~\ref{sec:precision}).
   \item We empirically validate all theoretical claims on four models across two attention variants (Section~\ref{sec:experiments}).
 \end{enumerate}
 
@@ -106,16 +106,18 @@ where $I_r$ is the $r \times r$ identity matrix. The right-hand side stores $dr 
 
 Figure~\ref{fig1} illustrates Proposition~\ref{prop:matshrink} for a single pair.
 
-% TODO
-%\begin{remark}[Feasibility]
-%\label{rem:feasibility}
-%A full-rank $W_B$ guarantees an invertible $r \times r$ sub-block exists. Since the set of rank-deficient matrices has Lebesgue measure zero in $\mathbb{R}^{r \times e}$ \citep{invertible}, this condition holds generically. In practice it is enforced by column permutation via pivoted QR (Section~\ref{sec:precision}).
-%\end{remark}
-
 \begin{remark}[Dual formulation]
 \label{rem:dual}
-An equivalent $r^2$ reduction is obtained by shrinking $W_A$ instead. Partition $W_A = [W_{A1};\, W_{A2}]$ with $W_{A1} \in \mathbb{R}^{r \times r}$ invertible, $W_{A2} \in \mathbb{R}^{(d-r) \times r}$. Then $W_A W_B = [I_r;\, W_{A2}^*] W_A^{**}$ where $W_A^{**} = W_{A1} W_B$ and $W_{A2}^* = W_{A2} W_{A1}^{-1}$. This is the natural choice when it is preferable to preserve the structure of $W_B$ (Fig.~\ref{fig2}).
+An equivalent $r^2$ reduction is obtained by shrinking $W_A$ instead. Partition $W_A = [W_{A1};\, W_{A2}]$
+with $W_{A1} \in \mathbb{R}^{r \times r}$ invertible, $W_{A2} \in \mathbb{R}^{(d-r) \times r}$.
+Then $W_A W_B = \left[ W_{A1}; W_{A2} \right] W_B = \left[ I_r; W_{A2}^\ast \right] W_B^\ast$
+where $W_B^\ast = W_{A1} W_B$ and $W_{A2}^\ast = W_{A2} W_{A1}^{-1}$, see Fig. \ref{fig2}.
+This is the natural choice when it is preferable to preserve the structure of $W_B$.
 \end{remark}
+
+%\textbf{Alternative way.} Alternatively, we can split matrix $W_A$ into two submatrices
+%$W_{A1}$ \eR{r}{r} and $W_{A2}$ such that $W_A = [W_{A1}; W_{A2}]$.
+%We can then eliminate $W_{A1}$ as $W = \left[ W_{A1}; W_{A2} \right] W_B = \left[ I; W_{A2}^\ast \right] W_B^\ast$ with identity matrix $I$ \eR{r}{r} and where $W_B^\ast = W_{A1} W_B$ and $W_{A2}^\ast = W_{A2} W_{A1}^{-1}$, see Fig. \ref{fig2}. This also saves $r^2$ weights and $r^2$ multiply operations per token $x$.
 
 \begin{figure}[h!] \centering
   \includegraphics[scale=0.88]{../doc/fig/matShrink_fig2.pdf}
@@ -123,12 +125,16 @@ An equivalent $r^2$ reduction is obtained by shrinking $W_A$ instead. Partition 
   % TODO: \caption{Alternative way of shrinking $W_A$ instead of $W_B$}
 \label{fig2} \end{figure}
 
-\paragraph{Weight savings.}\label{cor:savings}
-Under Proposition~\ref{prop:matshrink}, the parameter count decreases from $dr + re$ to $dr + re - r^2$, a multiplicative reduction factor of
-\[
-  \rho = 1 - \frac{r^2}{dr + re} = 1 - \frac{r}{d + e}.
-\]
-For the square case $d = e$: $\rho = 1 - r/(2d)$. Savings are maximized when $r \ll \min(d,e)$ and vanish when $d = e = r$.
+%\paragraph{Weight savings.}\label{cor:savings}
+%Under Proposition~\ref{prop:matshrink}, the parameter count decreases from $dr + re$ to $dr + re - r^2$, a multiplicative reduction factor of
+%\[
+%  \rho = 1 - \frac{r^2}{dr + re} = 1 - \frac{r}{d + e}.
+%\]
+%For the square case $d = e$: $\rho = 1 - r/(2d)$. Savings are maximized when $r \ll \min(d,e)$ and vanish when $d = e = r$.
+
+%Inverting the submatrix $W_{B1}$ requires that this submatrix is invertible, which is often the case because it is extremely rare for large matrices to be non-invertible. In the rare case that $W_{B1}$ is non-invertible, we can first permute the columns of the original matrix $W_B$ such that the first $r$ columns of the permuted matrix form an invertible submatrix $W_{B1}$.
+
+For completeness, if $e = r$, then the entire matrix $W_{B2}$ is eliminated. In general, if $e \leq r$, then the two matrices $W_A$ and $W_B$ can be fused into a single matrix $W^\ast = W_A \cdot W_B$ with only $d e$ weights (instead of $d r + r e$ weights for the original matrices $W_A$ and $W_B$). This type of weight fusion is utilized in \cite{remove, marko}.
 
 \subsection{Algorithm}
 Algorithm~\ref{alg:matshrink} is a complete, self-contained preprocessing procedure for retrofitting a pretrained model. Steps 1--4 are a one-time, per-layer cost; the forward pass (Step 5) requires no additional runtime modifications.
@@ -156,12 +162,6 @@ Algorithm~\ref{alg:matshrink} is a complete, self-contained preprocessing proced
 %    = W_A^\ast \cdot \left[ I, W_{B2}^\ast \right]
 %\end{equation*}
 
-%Inverting the submatrix $W_{B1}$ requires that this submatrix is invertible, which is often the case because it is extremely rare for large matrices to be non-invertible. In the rare case that $W_{B1}$ is non-invertible, we can first permute the columns of the original matrix $W_B$ such that the first $r$ columns of the permuted matrix form an invertible submatrix $W_{B1}$.
-
-%For completeness, if $e = r$, then the entire matrix $W_{B2}$ is eliminated. In general, if $e \leq r$, then the two matrices $W_A$ and $W_B$ are fused into a single matrix $W^\ast = W_A \cdot W_B$ with only $d e$ weights (instead of $d r + r e$ weights for the original matrices $W_A$ and $W_B$). This type of weight fusion is utilized in \cite{remove, marko}.
-
-%\textbf{Alternative way.} Alternatively, we can split matrix $W_A$ into two submatrices $W_{A1}$ \eR{r}{r} and $W_{A2}$ such that $W_A = [W_{A1}; W_{A2}]$. We can then eliminate $W_{A1}$ as $W = \left[ W_{A1}; W_{A2} \right] W_B = \left[ I; W_{A2}^\ast \right] W_B^\ast$ with identity matrix $I$ \eR{r}{r} and where $W_B^\ast = W_{A1} W_B$ and $W_{A2}^\ast = W_{A2} W_{A1}^{-1}$, see Fig. \ref{fig2}. This also saves $r^2$ weights and $r^2$ multiply operations per token $x$.
-
 \section{MatShrink for MHA Transformers}
 \label{sec:mha}
 
@@ -170,14 +170,13 @@ In multi-head attention (MHA) \citep{vanilla}, the value (V) and output (O) proj
 
 \begin{figure}[h!] \centering
   \includegraphics[scale=0.88]{../doc/fig/matShrink_fig3.pdf}
-  \caption{MatShrink (Proposition~\ref{prop:matshrink}) applied to the V-O projection pair of a single MHA head: (a) original; (b) compressed, eliminating $r^2 = d_k^2$ weights from $W_O$.}
-  % TODO: \caption{MatShrink for V and O projections of a single attention head: (a) original V and O projections; (b) equivalent implementation using MatShrink, which eliminates $r^2$ weights from $W_O$.}
+  \caption{MatShrink (Proposition~\ref{prop:matshrink}) applied to the V-O projection pair of a single attention head: (a) original; (b) compressed, eliminating $r^2 = d_k^2$ weights from $W_O$; (c) alternative formulation where $r^2$ weights are eliminated from $W_V$ rather than $W_o$.}
 \label{fig3} \end{figure}
 
 \paragraph{MHA V-O savings.}\label{prop:mha-vo}
-For MHA with $h$ heads and model dimension $d = d_\text{model}$, each head has dimension $r = d_k = d/h$. Applying MatShrink to every head's V-O pair eliminates $r^2 = d^2/h^2$ weights per head and $d^2/h$ weights per layer in total---a fraction $1/(2h)$ of the $2d^2$ total V-O parameters. This follows directly from the weight savings formula with $e = d$ and $r = d/h$: savings per head $= r^2 = d^2/h^2$; summing over $h$ heads gives $d^2/h$.
-
-Table~\ref{tab1} instantiates the MHA V-O savings formula on representative models.
+For MHA with $h$ heads and model dimension $d = d_\text{model}$, each head has dimension $r = d_k = d/h$. Applying MatShrink to every head's V-O pair eliminates $r^2 = d^2/h^2$ weights per head and $d^2/h$ weights per layer in total---a fraction $1/(2h)$ of the $2d^2$ total V-O parameters.
+%This follows directly from the weight savings formula with $e = d$ and $r = d/h$:
+Savings per head $= r^2 = d^2/h^2$; summing over $h$ heads gives $d^2/h$. Table~\ref{tab1} shows the MHA V-O savings for representative models.
 
 \begin{table}[h!] \centering
 \caption{MHA weight savings from MatShrink (V-O projections). ``Savings'' is weights eliminated per layer; ``savings \%'' is relative to all V-O parameters ($2d^2$ per layer). The savings formula $d_k^2 h$ follows from the MHA V-O savings derivation in Section~\ref{sec:mha}.}
@@ -189,39 +188,30 @@ Table~\ref{tab1} instantiates the MHA V-O savings formula on representative mode
   T5-11B \cite{T5}               & 1,024  & 128  & 128  & 16.8M  & 2.1M  & 13\% \\ \fline
 \end{tabular} \label{tab1} \end{table}
 
-Figure~\ref{fig4} shows the dual V-O formulation (Remark~\ref{rem:dual}), eliminating weights from $W_V$ instead.
-\begin{figure}[h!] \centering
-  \includegraphics[scale=0.88]{../doc/fig/matShrink_fig4.pdf}
-  \caption{Dual V-O MatShrink (Remark~\ref{rem:dual}): $r^2$ weights eliminated from $W_V$ rather than $W_O$.}
-  % TODO \caption{Alternative MatShrink implementation for V and O projections of a single attention head: (a) original V and O projections; (b) equivalent implementation using the alternative MatShrink scheme from Fig. \ref{fig2}, which eliminates $r^2$ weights from $W_V$.}
-\label{fig4} \end{figure}
-
 \paragraph{Q-K projections.}
-For models without RoPE (e.g., Whisper \cite{whisper}, T5 \cite{T5}), the query and key projections $W_{Q,i}, W_{K,i}$ form a back-to-back pair whose composition determines the attention logits.
+For models without RoPE and without QK-normalization (e.g., Whisper \cite{whisper}, T5 \cite{T5}), the query and key projections $W_{Q,i}, W_{K,i}$ form a back-to-back pair whose composition determines the attention logits.
 
 \begin{figure}[h!] \centering
   \includegraphics[scale=0.88]{../doc/fig/matShrink_fig5.pdf}
-  \caption{MatShrink for Q-K projections (Section~\ref{sec:mha}): the attention dot-product $p$ is preserved despite $Q^* \neq Q$ and $K^* \neq K$.}
-  % TODO \caption{MatShrink for Q and K projections of a single attention head. Left: original Q and K projections and their dot-product $p$. Right: equivalent implementation using MatShrink, which eliminates $r^2$ weights from $W_Q$.}
+  \caption{MatShrink for Q-K projections (Section~\ref{sec:mha}) of a single attention head.
+    Left: original Q and K projections and their dot-product $p$.
+    Top right: equivalent implementation using MatShrink, which eliminates $r^2$ weights from $W_Q$.
+    Bottom right: alternative implementation, which eliminates $r^2$ weights from $W_K$.}
+%  \caption{Dual Q-K MatShrink: $r^2$ weights eliminated from $W_K$ (cf.\ Section~\ref{sec:mha} with $T = W_{K1}$).}
+  % TODO: \caption{Alternative MatShrink implementation for Q and K projections of a single attention head. Left: original Q and K projections and their dot-product $p$. Right: equivalent implementation using MatShrink, which eliminates $r^2$ weights from $W_K$ (instead of $W_Q$).}
 \label{fig5} \end{figure}
 
 \paragraph{Q-K dot-product invariance under MatShrink.}\label{prop:qk}
-Let $W_Q, W_K \in \mathbb{R}^{d \times r}$ be query and key projection matrices. For any invertible $T \in \mathbb{R}^{r \times r}$, define $W_Q^* = W_Q T$ and $W_K^* = W_K T^{-\top}$. Then the attention dot-product is preserved:
+MatShrink also applies to the query and key weight matrices $W_Q$ and $W_K$, with one twist: unlike V-O, the goal is not to compress a sequential product $W_Q W_K$, but to preserve the attention dot-product $Q K^\top = (x W_Q)(x W_K)^\top$. The key observation is that multiplying $W_Q$ by any invertible matrix $T$ and $W_K$ by $(T^{-1})^\top$ leaves every dot-product unchanged, since the two transformations cancel:
 \[
-  (x W_Q^*)(x W_K^*)^\top = x W_Q T \cdot T^{-1} W_K^\top x^\top = (x W_Q)(x W_K)^\top.
+  (x W_Q T) \left(x W_K (T^{-1})^\top \right)^\top = x W_Q T T^{-1} (x W_K)^\top = (x W_Q)(x W_K)^\top.
 \]
-Setting $T = W_{Q1}$ (the leading $r \times r$ block of $W_Q$, assumed invertible) yields MatShrink: $W_Q^*$ has an identity leading block, eliminating $r^2$ weights from $W_Q$.
+Crucially, the transformed queries $Q^* = x W_Q T$ and keys $K^* = x W_K (T^{-1})^\top$ are individually different from the originals---yet their dot-product $Q^* {K^*}^\top$ is identical to $Q K^\top$ for every possible input. This means the attention scores, and therefore the model outputs, are completely unchanged.
 
 \paragraph{Partial RoPE.}
-Many modern models apply RoPE to a fraction $\alpha \in (0,1)$ of $d_k$ (typically $\alpha = 1/2$). The dot-product invariance result above applies to the non-RoPE portion of size $(1-\alpha)d_k$, yielding per-head savings of $(1-\alpha)^2 d_k^2$. For $\alpha = 1/2$: savings $= d_k^2/4$ per head.
+Many modern models apply RoPE to only a fraction $\alpha \in (0,1)$ of $d_k$ (typically $\alpha = 1/2$ or less). The dot-product invariance result above applies to the non-RoPE portion of size $(1-\alpha)d_k$, yielding per-head savings of $(1-\alpha)^2 d_k^2$.
 
-Figure~\ref{fig6} shows the dual Q-K formulation eliminating weights from $W_K$ instead of $W_Q$.
-\begin{figure}[h!] \centering
-  \includegraphics[scale=0.88]{../doc/fig/matShrink_fig6.pdf}
-  \caption{Dual Q-K MatShrink: $r^2$ weights eliminated from $W_K$ (cf.\ Section~\ref{sec:mha} with $T = W_{K1}$).}
-  % TODO: \caption{Alternative MatShrink implementation for Q and K projections of a single attention head. Left: original Q and K projections and their dot-product $p$. Right: equivalent implementation using MatShrink, which eliminates $r^2$ weights from $W_K$ (instead of $W_Q$).}
-\label{fig6} \end{figure}
-
+%Figure~\ref{fig6} shows the dual Q-K formulation eliminating weights from $W_K$ instead of $W_Q$.
 
 %\textbf{MatShrink for transformers.} MatShrink reduces the number of weights for the following back-to-back weight matrices in transformer models:
 %\begin{itemize}[topsep=-1pt]
@@ -302,13 +292,10 @@ MatShrink can be applied to MLA attention weights in the following four-step seq
 \end{enumerate}
 Steps 1 and 2 act on disjoint weight pairs and are independent. After step~2, $\WW{UQ}$ is modified to $\WW{UQ}^*$, but the composite map $\WW{DQ} \WW{UQ}^*$ is identical to $\WW{DQ} \WW{UQ}$ (by the Q-K dot-product invariance above); hence step~3 is a valid application of Proposition~\ref{prop:matshrink} to $(\WW{DQ}, \WW{UQ}^*)$. Step~4 is analogous.
 
-\paragraph{Concrete savings for DeepSeek-R1/V3.}
-For the 685B-class models ($d=7168$, $r_\text{KV}=512$, $r_\text{Q}=1536$, $h=128$, $d_\text{NOPE}=128$, 61 layers), the four steps of the application order above eliminate per layer: step~1: $128 \times 128^2 = 2{,}097{,}152$ weights; step~2: $2{,}097{,}152$ weights; step~3: $1536^2 = 2{,}359{,}296$ weights; step~4: $512^2 = 262{,}144$ weights. Total: $\approx 6.8\text{M}$ weights per layer, or $\approx \mathbf{414M}$ parameters eliminated across all 61 attention layers, with zero accuracy cost.
+However, many MLA models deploy latent normalization by having an RMSNorm layer in-between each pair of down- and up-projections. This normalization prevents applying MatShrink to the Q-latent pair and KV-latent pair (steps 3 and 4).
 
-
-
-
-
+%\paragraph{Concrete savings for DeepSeek-R1/V3.}
+%For the 685B-class models ($d=7168$, $r_\text{KV}=512$, $r_\text{Q}=1536$, $h=128$, $d_\text{NOPE}=128$, 61 layers), the four steps of the application order above eliminate per layer: step~1: $128 \times 128^2 = 2{,}097{,}152$ weights; step~2: $2{,}097{,}152$ weights; step~3: $1536^2 = 2{,}359{,}296$ weights; step~4: $512^2 = 262{,}144$ weights. Total: $\approx 6.8\text{M}$ weights per layer, or $\approx \mathbf{414M}$ parameters eliminated across all 61 attention layers, with zero accuracy cost.
 
 %\section{MatShrink for MLA transformers}
 %Table \ref{tab2} shows the configurations of various transformer models with MLA. We are using the following parameter names similar to \citep{deepseek-v2}:
@@ -329,27 +316,6 @@ For the 685B-class models ($d=7168$, $r_\text{KV}=512$, $r_\text{Q}=1536$, $h=12
 %    \item $\WW{UV}$: up-projection for V
 %  \end{itemize}
 %\end{itemize}
-
-% shortcuts (only letters are allowed in macro names, no numbers and dashes)
-%\def\dsRone     {\href{https://huggingface.co/deepseek-ai/DeepSeek-R1}         {DeepSeek-R1}}
-%\def\pplRone    {\href{https://huggingface.co/perplexity-ai/r1-1776}           {Perplexity R1-1776}}
-%\def\dsVthree   {\href{https://huggingface.co/deepseek-ai/DeepSeek-V3}         {V3}}
-%\def\misLarge   {\href{https://huggingface.co/mistralai/Mistral-Large-3-675B-Base-2512} {Mistral Large 3 675B}}
-%\def\dsVtwoFive {\href{https://huggingface.co/deepseek-ai/DeepSeek-V2.5}       {DeepSeek-V2.5}}
-%\def\dsVtwoL    {\href{https://huggingface.co/deepseek-ai/DeepSeek-V2-Lite}    {DeepSeek-V2-lite}}
-%\def\dsVLtwoS   {\href{https://huggingface.co/deepseek-ai/deepseek-vl2-small}  {VL2-small }}
-%\def\MiniCPM    {\href{https://huggingface.co/openbmb/MiniCPM3-4B}             {OpenBMB MiniCPM3-4B }}
-
-%\begin{table}[h!] \centering
-%\caption{Configurations of various MLA models}
-%\begin{tabular}{lcccccccc} \fline
-%  \thead[l]{Model} & \thead{Params} & $d$ & $r_\text{Q}$ & $r_\text{KV}$ & $h$ & $d_\text{NOPE}$ & $d_\text{ROPE}$ \\ \hline
-%  \pplRone, \dsRone, \dsVthree           & 685B  & 7,168  & 1,536  & 512  & 128  & 128  & 64 \\
-%  \misLarge                              & 675B  & 7,168  & 1,536  & 512  & 128  & 128  & 64 \\
-%  \dsVtwoFive                            & 236B  & 5,120  & 1,536  & 512  & 128  & 128  & 64 \\
-%  \dsVtwoL, \dsVLtwoS \cite{deepseek-v2} & 16B   & 2,048  & N/A    & 512  & 16   & 128  & 64 \\
-%  \MiniCPM \cite{miniCPMv2}              & 4B    & 2,560  & 768    & 256  & 40   & 64   & 32 \\ \fline
-%\end{tabular} \label{tab2} \end{table}
 
 % BEFORE with column h * d_NOPE
 %  \thead[l]{Model} & \thead{Params} & $d$ & $r_\text{Q}$ & $r_\text{KV}$ & $h$ & $d_\text{NOPE}$ & $h \cdot d_\text{NOPE}$ & $d_\text{ROPE}$ \\ \hline
@@ -422,23 +388,14 @@ Let $W \approx \hat{W}_A \hat{W}_B$ be a rank-$r$ approximation of $W \in \mathb
 %Approximate weight compression schemes such as \cite{laser} and \cite{MoDeGPT} use SVD (singular value decomposition) to reduce the ranks of weight matrices, and thus reduce weights. This is applicable for example for the large weight matrices of the transformer’s FFN (feedforward networks). The SVD decomposition factorizes the original matrix $W$ \eR{d}{e} into two matrices $W_A$ and $W_B$ where $r$ is the compressed rank. After performing SVD and compressing the rank by a certain percentage, we can then eliminate $r^2$ weights using our MatShrink scheme. Note that reducing the rank by a certain percentage is not an exact implementation of the original matrix $W$ but an approximation.
 
 \section{Numerical Stability: Pivoted QR Basis Selection} \label{sec:precision}
+MatShrink requires inverting a chosen $r \times r$ sub-block $M$ of $W_B$; any invertible choice gives the same mathematical result. In practice, however, the choice matters when weights are stored in bf16 or lower precision: if $M$ is nearly singular, $M^{-1}$ contains very large entries that amplify bf16 rounding errors in the compressed weights. With the naive choice of the first $r$ columns of $W_B$, this can cause perplexity to diverge (Table~\ref{tab:matshrink-bf16}). Under fp32 the problem does not arise.
 
-\subsection{The bf16 Problem}
-MatShrink stores $W_A^* = W_A M$ and $W_{B2}^* = M^{-1} W_{B2}$. Under fp32, error is $\mathcal{O}(10^{-14})$ (negligible). Under bf16, the 7-bit mantissa causes rounding of $W_A^*$ and $W_{B2}^*$ proportional to $\cond(M)$: with the naive $M = W_B[:r,:r]$ choice, condition numbers reach $\cond(M) \sim 10^5$, causing perplexity regressions of up to $+25$ absolute points (Table~\ref{tab:matshrink-bf16}).
-
-\subsection{Pivoted QR Is Optimal}
-As noted in Proposition~\ref{prop:matshrink}, the sub-block $M$ can be any invertible $r \times r$ sub-block of $W_B$; different choices yield the same function but different numerical properties of the stored weights. We seek the choice that minimizes $\cond(M)$.
-
-\paragraph{Pivoted QR minimizes worst-case condition number.}\label{prop:pqr}
-Among all $\binom{e}{r}$ ways to choose $r$ columns of $W_B$ as the sub-block $M$, the pivoted QR decomposition
+\paragraph{Fix: pivoted QR column selection.}\label{prop:pqr}
+We select $M$ using pivoted QR decomposition, which greedily picks the $r$ columns of $W_B$ that carry the most independent information---producing an $M$ that is as far from singular as possible:
 \[
-  (Q, R, P) \gets \mathrm{pQR}(W_B), \qquad M \gets W_B[:, P[:r]]
+  (Q, R, P) \gets \mathrm{pQR}(W_B), \qquad M \gets W_B[:, P[:r]].
 \]
-selects the $r$ columns that maximize $|\det(M)|$ subject to column norms and, by the interlacing property of singular values, yield the smallest achievable worst-case $\cond(M)$ among column-permutation strategies. This follows because pivoted QR with column pivoting greedily selects at each step the column with largest residual norm---equivalent by the Cauchy--Binet formula to maximizing the absolute value of the leading $r \times r$ minor. A larger $|\det(M)|$ implies a larger $\sigma_{\min}(M)$ (since $\sigma_{\min}(M) \geq |\det(M)| / \prod_{i=1}^{r-1} \sigma_i(M)$), and hence a smaller $\cond(M) = \sigma_{\max}(M)/\sigma_{\min}(M)$ for fixed $\sigma_{\max}(M)$.
-
-\begin{remark}[Explicit change of basis]
-The pivoted-QR choice corresponds to the change of basis $T = M \cdot M_0^{-1}$ where $M_0 = W_B[:, :r]$. Running MatShrink on $(W_A T, T^{-1} W_B)$ produces the same $(W_A^*, W_{B2}^*)$ as directly using $M$ as the sub-block. The direct approach is a one-line call: \texttt{scipy.linalg.qr(W\_B.T, pivoting=True)}.
-\end{remark}
+In practice this is a one-liner: \texttt{scipy.linalg.qr(W\_B.T, pivoting=True)}. As Table~\ref{tab:matshrink-bf16} shows, this reduces bf16 regressions to within $\pm 0.05$ perplexity points of the source model's bf16 baseline across all four tested models.
 
 \section{Experiments} \label{sec:experiments}
 We validate MatShrink's core claim of mathematical equivalence empirically on four models spanning both attention variants covered by the paper and two head dimension: SmolLM2-135M \citep{smollm}, a 30-layer decoder-only transformer with GQA ($n_\text{heads} = 9$, $n_\text{KV} = 3$, $d_\text{head} = 64$); GPT-2-124M \citep{gpt2}, a 12-layer MHA transformer ($n_\text{heads} = 12$, $d_\text{head} = 64$); and Gemma-3 \citep{gemma3} at the 1B (text-only) and 4B (multimodal, text-backbone-only) sizes, both with $d_\text{head} = 256$, the regime where MatShrink's per-head $r^2$ savings accumulate most (Table \ref{tab1}). All experiments run on a single NVIDIA A100 GPU and evaluate perplexity on the full WikiText-2 raw test split using non-overlapping context-length windows.
@@ -533,10 +490,14 @@ Because the identity blocks are stored as dense tensors, the runtime performs re
 \textbf{Note on further quantization.} A separate consequence of pivoted-QR selection is that $W_V^\ast$ and $W_O^\ast$ retain the magnitude range of the source $W_V$ and $W_O$ (since a well-conditioned $M^{-1}$ does not inflate entries), whereas the naive identity-$M$ variant produces rewritten weights with inflated magnitudes that track $\kappa(M)$. Downstream 8-bit or 4-bit weight quantization, which depends on a bounded weight distribution, should therefore compose more gracefully with pivoted-QR MatShrink than with the identity variant. Systematic evaluation of MatShrink plus quantization is left to future work.
 
 \section{Conclusion}
-We presented MatShrink, a theoretically grounded, empirically validated framework for losslessly eliminating $r^2$ parameters from any pair of consecutive linear layers. The core result (Proposition~\ref{prop:matshrink}) is an elementary change-of-basis identity; the pivoted QR analysis (Section~\ref{sec:precision}) establishes the numerically optimal choice of sub-block. Specializations to MHA, MLA, GQA, MQA (Sections~\ref{sec:mha}--\ref{sec:gqa}) quantify savings of 8--17\% of attention parameters for MHA and $\sim$414M parameters for DeepSeek-R1/V3-scale MLA. Experiments on four models confirm exact fp32 equivalence and near-exact bf16 equivalence, with compressed checkpoints loading in production inference engines without modification.
+We presented MatShrink, a theoretically grounded, empirically validated framework for losslessly eliminating $r^2$ parameters from any pair of consecutive linear layers. The core result (Proposition~\ref{prop:matshrink}) is an elementary change-of-basis identity; the pivoted QR analysis (Section~\ref{sec:precision}) establishes the numerically optimal choice of sub-block. Specializations to MHA, MLA, GQA, MQA (Sections~\ref{sec:mha}--\ref{sec:gqa}) quantify savings of 8--17\% of attention parameters for MHA.
+Experiments on four models confirm exact fp32 equivalence and near-exact bf16 equivalence, with compressed checkpoints loading in production inference engines without modification.
 
 \paragraph{Limitations and future work.}
-The weight savings currently do not yield proportional throughput improvements, since identity blocks are stored and multiplied as dense tensors; realizing the compute reduction requires structured-sparse runtime support. Extending empirical validation to MLA models, evaluating composition with post-training quantization (Section~\ref{sec:precision}), integrating MatShrink-aware kernels into production engines (llama.cpp \citep{llama-cpp}, SGLang \citep{sglang}) are natural directions for future work.
+The weight savings currently do not yield proportional throughput improvements, since identity blocks are stored and multiplied as dense tensors; realizing the compute reduction requires structured-sparse runtime support.
+When pivoted QR is used, the column permutation must also be stored and applied at inference time (or folded into subsequent layers if possible); finding compact representations of this permutation and efficient kernel-level implementations is an additional open problem.
+Beyond post-training compression, future models could adopt MatShrink's reduced weight structures from the outset, training directly on the smaller parametrization and achieving better parameter efficiency from scratch.
+Extending empirical validation to MLA models, evaluating composition with post-training quantization (Section~\ref{sec:precision}), integrating MatShrink-aware kernels into production engines (llama.cpp \citep{llama-cpp}, SGLang \citep{sglang}) are natural directions for future work.
 
 %\section*{Acknowledgments}
 %We would like to thank TBD for helpful feedback on this work.
