@@ -5,7 +5,8 @@
 \item {\bf Claims}
     \item[] Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: The abstract states (a) the algebraic identity for back-to-back linear layers, (b) the application to V-O, Q-K, and latent projections of MHA, MLA, GQA, and MQA, with 8--17\% per-layer attention-parameter savings across representative models, (c) a numerical-stability result establishing pivoted-QR basis selection as worst-case-optimal among column-permutation strategies, and (d) empirical fp32 equivalence and near-exact bf16 equivalence on GPT-2-124M, SmolLM2-135M, Gemma-3-1B, and Gemma-3-4B, with checkpoints loadable in HuggingFace Transformers and vLLM without runtime modification. Each claim is matched by a corresponding result in Sections~\ref{sec:method},
+\ref{sec:stability}, and~\ref{sec:experiments}.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the abstract and introduction do not include the claims made in the paper.
@@ -17,7 +18,7 @@
 \item {\bf Limitations}
     \item[] Question: Does the paper discuss the limitations of the work performed by the authors?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: Section~\ref{sec:limitations} addresses (a) the GQA/MQA query-sharing factor that reduces per-layer savings relative to MHA, (b) the numerical-precision regime: bf16 storage of the shrunk weights can degrade quality when $\kappa(M)$ is large, mitigated but not fully eliminated by pivoted-QR basis selection at large model scales, (c) realized inference speedups require runtime support to skip identity-block matmuls; the explicit-identity mode demonstrated here gives correctness without compute savings, and (d) the simplified-MLA proposal in Section~3 is not bit-exact against standard MLA and warrants further empirical validation on larger MLA models.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper has no limitation while the answer \answerNo{} means that the paper has limitations, but those are not discussed in the paper.
@@ -33,7 +34,7 @@
 \item {\bf Theory assumptions and proofs}
     \item[] Question: For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: Two formal propositions are stated with full assumptions and proved in the main body. Proposition~1 (the algebraic identity) requires invertibility of an $r \times r$ submatrix of $W_B$; the proof is two lines via matrix associativity. Proposition~2 (worst-case-optimal condition number under pivoted-QR basis selection) is proved by a standard pivoting argument; we also state the genericity assumption under which the invertibility precondition holds for trained weights and verify it empirically (median $\kappa(M) = 436$, max $\kappa(M) = 9.87 \times 10^3$ across 90 transformations on SmolLM2-135M).
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include theoretical results.
@@ -47,7 +48,7 @@
     \item {\bf Experimental result reproducibility}
     \item[] Question: Does the paper fully disclose all the information needed to reproduce the main experimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification:  Each empirical claim is supported by a publicly hosted reproducibility notebook in the transformer-tricks repository: matShrink\_paper.ipynb (SmolLM2-135M, V-O composition check across all (layer, head) pairs, and Wikitext-2 perplexity at bf16 / fp16 / fp32 storage), with corresponding notebooks for the GPT-2-124M, Gemma-3-1B, and Gemma-3-4B results. Hardware, model identifier, dataset split, evaluation protocol, storage precisions, and basis-selection rule (pivoted QR) are pinned in each notebook. The fp64 inversion is explicit in matshrink\_vo().
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -66,7 +67,7 @@
 \item {\bf Open access to data and code}
     \item[] Question: Does the paper provide open access to the data and code, with sufficient instructions to faithfully reproduce the main experimental results, as described in supplemental material?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: The transformer-tricks repository contains the paper source, the matshrink\_vo() and matshrink\_repo() implementations, and the per-model reproducibility notebooks. Wikitext-2 is publicly available via the HuggingFace datasets library. Models used (GPT-2-124M, SmolLM2-135M, Gemma-3-1B, Gemma-3-4B) are publicly available HuggingFace checkpoints. For anonymous review, an anonymised mirror is provided.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that paper does not include experiments requiring code.
@@ -82,7 +83,7 @@
 \item {\bf Experimental setting/details}
     \item[] Question: Does the paper specify all the training and test details (e.g., data splits, hyperparameters, how they were chosen, type of optimizer) necessary to understand the results?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: For each empirical run we specify hardware (NVIDIA T4 GPU on Google Colab), model identifier, dataset (Wikitext-2 raw test split, non-overlapping context-length windows via tt.perplexity), inversion precision (fp64), storage precisions evaluated (bf16, fp16, fp32), and basis-selection rule (pivoted QR on the target $W_O$ slice for each KV group). No training is performed.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -93,7 +94,7 @@
 \item {\bf Experiment statistical significance}
     \item[] Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: MatShrink is a deterministic algebraic transformation evaluated on fixed models and a fixed dataset; perplexity is computed via deterministic forward passes. There is no source of randomness in any reported experiment, and per-head V-O composition checks pass exactly in fp64 (max element-wise error $1.88 \times 10^{-14}$ on SmolLM2-135M). Reporting confidence intervals is not applicable.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -110,7 +111,7 @@
 \item {\bf Experiments compute resources}
     \item[] Question: For each experiment, does the paper provide sufficient information on the computer resources (type of compute workers, memory, time of execution) needed to reproduce the experiments?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: Each per-model experiment runs on a single NVIDIA T4 GPU (Google Colab). Wall-clock per model for the full precision sweep (baseline + MatShrink at three storage precisions, full Wikitext-2) is under three minutes on SmolLM2-135M and GPT-2-124M; correspondingly longer for Gemma-3-1B and Gemma-3-4B. Total project compute, including exploratory runs and the per-model reproductions, is well under one GPU-day.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -133,7 +134,7 @@
 \item {\bf Broader impacts}
     \item[] Question: Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed?
     \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: MatShrink is foundational efficiency work that preserves model outputs; it does not change model capabilities and has no specific dual-use path. Lower inference cost may broaden access and reduce the energy footprint of LLM deployment.
+    \item[] Justification: MatShrink is foundational efficiency work that preserves model outputs (exactly in infinite precision; lossless to four decimal places at fp16 storage); it does not change model capabilities and has no specific dual-use path. Lower inference cost may broaden access and reduce the energy footprint of LLM deployment.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that there is no societal impact of the work performed.
@@ -147,7 +148,7 @@
 \item {\bf Safeguards}
     \item[] Question: Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse (e.g., pre-trained language models, image generators, or scraped datasets)?
     \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: No new models with novel capabilities are released. The created checkpoints are reformulations of existing public weights and introduce no new misuse surface.
+    \item[] Justification: No new models with novel capabilities are released. Any shrunk checkpoints are mathematically equivalent reformulations of existing public weights and introduce no new misuse surface.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper poses no such risks.
@@ -159,7 +160,7 @@
 \item {\bf Licenses for existing assets}
     \item[] Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: All third-party assets are cited with their version: PyTorch (BSD), HuggingFace Transformers (Apache 2.0), vLLM (Apache 2.0), llama.cpp (MIT), CUTLASS (BSD-3-Clause), Triton (MIT), bitsandbytes (MIT). Models: Llama-3.2-1B-Instruct (Llama 3.2 Community License), SmolLM2-135M (Apache 2.0), Llama-3.1-8B (Llama 3.1 Community License). Each is referenced in the bibliography.
+    \item[] Justification: All third-party assets are cited with their version: PyTorch (BSD), HuggingFace Transformers (Apache 2.0), HuggingFace Datasets (Apache 2.0), NumPy (BSD), safetensors (Apache 2.0), vLLM (Apache 2.0). Models: GPT-2-124M (MIT), SmolLM2-135M (Apache 2.0), Gemma-3-1B (Gemma Terms of Use), Gemma-3-4B (Gemma Terms of Use). Datasets: Wikitext-2 (CC BY-SA 3.0). Each is referenced in the bibliography.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not use existing assets.
@@ -175,7 +176,7 @@
 \item {\bf New assets}
     \item[] Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification:
+    \item[] Justification: The matshrink\_vo() and matshrink\_repo() functions are documented inline in the transformer-tricks repository. The reproducibility notebook (matShrink\_paper.ipynb) documents the per-layer per-head composition check, the precision sweep, and the saved-checkpoint protocol. Any released shrunk checkpoints inherit license terms from their base model.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not release new assets.
@@ -211,7 +212,7 @@
     \item[] Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does \emph{not} impact the core methodology, scientific rigor, or originality of the research, declaration is not required.
     %this research?
     \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
-    \item[] Justification: Large language models (specifically Claude by Anthropic) were used as a coding and writing assistant during preparation of this work. Their role was limited to writing, editing, and code-drafting tasks: drafting reproducibility notebook scaffolds. The core scientific contributions of the paper, the experimental design, and the empirical measurements, were developed and verified by the human authors. No LLM was involved in generating measurements, running benchmarks, or making methodological decisions.
+    \item[] Justification: Large language models (Claude by Anthropic) were used as a coding and writing assistant during the preparation of this work. Their role was limited to writing, editing, and code-drafting tasks: drafting reproducibility notebook scaffolds, editing prose, drafting upstream pull-request and issue bodies, and assisting with documentation. The core scientific contributions of the paper, namely the algebraic identity (Section 1), its application to MHA, GQA, and MLA attention variants (Sections 2--4), and the simplified MLA proposal (Section 3), were developed and verified by the human authors. No LLM was involved in generating measurements, running benchmarks, or making methodological decisions. All quantitative results were independently reproduced by the authors before inclusion.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the core method development in this research does not involve LLMs as any important, original, or non-standard components.
