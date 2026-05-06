@@ -494,7 +494,7 @@ Experiments on four models confirm exact fp32 equivalence and near-exact bf16 eq
 \paragraph{Limitations and future work.}
 The weight savings currently do not yield proportional throughput improvements, since identity blocks are stored and multiplied as dense tensors; realizing the compute reduction requires structured-sparse runtime support.
 When pivoted QR is used, the column permutation must also be stored and applied at inference time (or folded into subsequent layers if possible); finding compact representations of this permutation and efficient kernel-level implementations is an additional open problem.
-Beyond post-training compression, future models could adopt MatShrink's reduced weight structures from the outset, training directly on the smaller parametrization and achieving better parameter efficiency from scratch.
+Beyond post-training compression, future models could adopt MatShrink's reduced weight structures from the outset, training directly on the smaller parameterization and achieving better parameter efficiency from scratch.
 Extending empirical validation to MLA models, evaluating composition with post-training quantization (Section~\ref{sec:precision}), integrating MatShrink-aware kernels into production engines (llama.cpp \citep{llama-cpp}, SGLang \citep{sglang}) are natural directions for future work.
 
 %\section*{Acknowledgments}
