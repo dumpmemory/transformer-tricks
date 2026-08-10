@@ -72,6 +72,8 @@ print(f'Published https://huggingface.co/{OUT}')
 
 The `strict=True` flag folds the per-channel norm weights `g` into the following linear layer and removes the now-redundant norm tensors from the state dict entirely. The resulting checkpoint is mathematically equivalent to the source (Proposition 1 of the [FlashNorm paper](https://arxiv.org/abs/2407.09577)). Framework support status (HuggingFace Transformers, vLLM, llama.cpp) is tracked on the canonical FlashNorm checkpoint: [open-machine/SmolLM2-135M-FlashNorm](https://huggingface.co/open-machine/SmolLM2-135M-FlashNorm).
 
+Published FlashNorm checkpoints: [SmolLM2-135M](https://huggingface.co/open-machine/SmolLM2-135M-FlashNorm), [Llama-3.2-1B](https://huggingface.co/open-machine/Llama-3.2-1B-FlashNorm), [Llama-3.1-8B](https://huggingface.co/open-machine/Llama-3.1-8B-FlashNorm), [gemma-4-E2B](https://huggingface.co/open-machine/gemma-4-E2B-FlashNorm).
+
 A runnable notebook version of this recipe is at [`notebooks/flashify_and_publish.ipynb`](https://colab.research.google.com/github/OpenMachine-ai/transformer-tricks/blob/main/notebooks/flashify_and_publish.ipynb).
 
 ---
@@ -90,6 +92,8 @@ fc.cancel_pre_attention_norms(model)               # fold gains, remove the divi
 ```
 
 The cancellation is exact for unregularized RMS and epsilon-approximate in practice. Validated on Gemma-4-E2B and Gemma-4-12B in fp32: max logit deviation at the rounding level of the exact weight fold itself, perplexity changes under 0.001%, greedy generations unchanged, HellaSwag unchanged (bf16 spot check).
+
+A ready-made folded checkpoint is published as [open-machine/gemma-4-E2B-FlashNorm](https://huggingface.co/open-machine/gemma-4-E2B-FlashNorm) (gains of `input_layernorm` and `pre_feedforward_layernorm` folded, loads in stock Transformers); `cancel_pre_attention_norms` applies to it directly.
 
 Important: eligibility must be checked, not assumed. In MLA models (DeepSeek-V2 family, MiniCPM3) the decoupled RoPE-key slice bypasses the latent norm, so full cancellation is invalid there (it breaks the model badly). Use `fc.mla_partial_cancel(model)` instead, which keeps the per-token RMS scalar but applies it only to the small RoPE slice, still eliminating the norm weights and the full-width multiply. Models that normalize only queries and keys (e.g. Gemma 3, no value norm) are not eligible, and `cancel_pre_attention_norms` refuses them by default. Run `python flashNorm_cancel_test.py` for a fast synthetic verification of all these cases.
 
